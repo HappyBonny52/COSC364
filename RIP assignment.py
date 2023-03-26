@@ -2,12 +2,22 @@ import sys
 import socket
 
 class Config:
+    """
+    Config object initialised with argument string that is the string representation
+    of the config filepath
     
+    for <obj> as initialised object name and <param> as the paramter in correct format
+    each parameter's value can be accessed by <obj>.params["<param>"] and will give
+    a list of string representation of the value/s
+    
+    """
     def __init__(self, path):
         """
-        path : string representation of config location
-        params : dict of key: parameter and value: value, all values are init as None
-        req_params : set of strings of expected REQUIRED paramters in config file
+        <path> : string representation of config location
+        
+        <params> : dict of key: parameter and value: value, all values are init as None
+        
+        <req_params> : set of strings of expected REQUIRED paramters in config file
         """
         self.path = path
         self.params = {
@@ -16,9 +26,9 @@ class Config:
             'outputs':None,
             'timers':None
         }
-        self.req_params = {'router-id', 'input-ports', 'outputs'}
+        self.__req_params = {'router-id', 'input-ports', 'outputs'}
         
-    def isPortValid(self, port):
+    def __isPortValid(self, port):
         """Checks if port is in range of 1024 <= port <= 64000
         returns True if in range and False otherwise"""
         if port < 1024 or port > 64000:
@@ -26,7 +36,7 @@ class Config:
         else:
             return True
         
-    def isRouterIdValid(self, routerId):
+    def __isRouterIdValid(self, routerId):
         """Checks routerId is in range of 1 <= routerId <= 64000
         returns True if in range and False otherwise"""        
         if routerId < 1 or routerId > 64000:
@@ -63,23 +73,23 @@ class Config:
                         raise IndexError
                     
                     if param == "router-id":
-                        if not self.isRouterIdValid(int(value[0])):
+                        if not self.__isRouterIdValid(int(value[0])):
                             #router-id is out of range
                             raise ValueError
                     
                     if param == "input-ports":
                         for port in value:
-                            if not self.isPortValid(int(port)):
+                            if not self.__isPortValid(int(port)):
                                 #input-ports is out of range
                                 raise ValueError
                             
                     if param == "outputs":
                         for output in value:
                             parsed = output.split("-")
-                            if not self.isRouterIdValid(int(parsed[2])):
+                            if not self.__isRouterIdValid(int(parsed[2])):
                                 #output router id is out of range
                                 raise ValueError
-                            if not self.isPortValid(int(parsed[0])):
+                            if not self.__isPortValid(int(parsed[0])):
                                 #output port is out of range
                                 raise ValueError
                     
@@ -100,7 +110,7 @@ class Config:
                     
         #checks for missing required parameters by finding if any of the required fields are still None
         for param in self.params:
-            if self.params[param] == None and param in self.req_params:
+            if self.params[param] == None and param in self.__req_params:
                 raise TypeError("PARAMETER <{}> MISSING. PLEASE CHECK CONFIG".format(param))    
         
       
