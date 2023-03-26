@@ -1,54 +1,109 @@
 import sys
 import socket
 
-def unpackConfig(config_path):
+class Config:
     
-    """
-    Function to unpack config parameters and returns them in their string representation
-    
-    <params> : a dict of string key and obj values of parameters that can exist in the config file.
-    <req_params> : a set of strings of required parameters for the program to function properly, the
-    program will terminate if any one of these parameters aren't present in the config.txt
-    
-    returns the array of values of <params> dict in the order of (router-id, input-ports, ouputs, timers)
-    """
-    
-    print("Config Path: ", config_path)
-    
-    config_file = open(config_path, "r")
-    config = config_file.read().split('\n')
-    config_file.close()
-
-    params = {
-        'router-id':None,
-        'input-ports':None,
-        'outputs':None,
-        'timers':None
-    }
-    req_params = {'router-id', 'input-ports', 'outputs'}
-    
-    for line in config:
+    def __init__(self, path):
+        """
+        path : string representation of config location
+        params : dict of key: parameter and value: value, all values are init as None
+        req_params : set of strings of expected REQUIRED paramters in config file
+        """
+        self.path = path
+        self.params = {
+            'router-id':None,
+            'input-ports':None,
+            'outputs':None,
+            'timers':None
+        }
+        self.req_params = {'router-id', 'input-ports', 'outputs'}
         
-        if line.split(' ', 1)[0] in params:
+    def isPortValid(self, port):
+        """Checks if port is in range of 1024 <= port <= 64000
+        returns True if in range and False otherwise"""
+        if port < 1024 or port > 64000:
+            return False
+        else:
+            return True
+        
+    def isRouterIdValid(self, routerId):
+        """Checks routerId is in range of 1 <= routerId <= 64000
+        returns True if in range and False otherwise"""        
+        if routerId < 1 or routerId > 64000:
+            return False
+        else:
+            return True
+        
+    def unpack(self):
+        """
+        Function to unpack config parameters and stores them in their representative variables
+        DOES NOT return anything. The values are stored as attributes of this class
+        """
+        
+        #for debug, prints the given arg which should be the path to the config file
+        print("Config Path: ", self.path)
+        
+        config_file = open(self.path, "r")
+        config = config_file.read().split('\n')
+        config_file.close()
+         
+        for line in config:
             
-            try:
-                param = line.split(' ', 1)[0]
-                value = line.split(' ', 1)[1].replace(' ', '')
+            #checks if line is even worth further parsing ie. is a parameter line
+            if line.split(' ', 1)[0] in self.params:
                 
-                if not value:
-                    raise IndexError
-                
-                params[param] = list(x.strip() for x in value.split(','))
-                
-            except(IndexError):
-                print("PARAMETER <{}> MISSING VALUES. PLEglobal variables or in mainASE CHECK CONFIG".format(param))
-                sys.exit(1)
-                
-    for param in params:
-        if params[param] == None and param in req_params:
-            raise TypeError("PARAMETER <{}> MISSING. PLEASE CHECK CONFIG".format(param))
+                try:
+                    #parses the line, param is a string and value is a list of strings
+                    param = line.split(' ', 1)[0]
+                    value = line.split(' ', 1)[1].replace(' ', '').split(',')
+                    
+                    #error handles
+                    if not value:
+                        #no value
+                        raise IndexError
+                    
+                    if param == "router-id":
+                        if not self.isRouterIdValid(int(value[0])):
+                            #router-id is out of range
+                            raise ValueError
+                    
+                    if param == "input-ports":
+                        for port in value:
+                            if not self.isPortValid(int(port)):
+                                #input-ports is out of range
+                                raise ValueError
+                            
+                    if param == "outputs":
+                        for output in value:
+                            parsed = output.split("-")
+                            if not self.isRouterIdValid(int(parsed[2])):
+                                #output router id is out of range
+                                raise ValueError
+                            if not self.isPortValid(int(parsed[0])):
+                                #output port is out of range
+                                raise ValueError
+                    
+                    
+                    #inserts the value in config file as the value for params dict for given key: param
+                    self.params[param] = value
+                    
+                except(IndexError):
+                    print("PARAMETER <{}> MISSING VALUES. PLEASE CHECK CONFIG".format(param))
+                    sys.exit(1)
+                except(ValueError):
+                    print("PARAMETER <{}> INVALID VALUE. PLEASE CHECK CONFIG".format(param))
+                    sys.exit(1)
+                except:
+                    #Uncatched error. Debug code if you see this prompted!!!
+                    print("--FATAL INTERNAL ERROR--")
+                    sys.exit(1)
+                    
+        #checks for missing required parameters by finding if any of the required fields are still None
+        for param in self.params:
+            if self.params[param] == None and param in self.req_params:
+                raise TypeError("PARAMETER <{}> MISSING. PLEASE CHECK CONFIG".format(param))    
         
-    return params.values()
+      
     
 class RoutingTable:
     """ Temp skeleton of routing table """
@@ -101,8 +156,8 @@ def bellmanFord(vertices, edges, source):
     return distance, predecessor
 
 def main():
-    config_path = sys.argv[1]
-    router_id, input_ports, outputs, timers = unpackConfig(sys.argv[1]);
-    print(router_id, input_ports, outputs, timers)
+    config = Config(sys.argv[1])
+    config.unpack();
+    print(config.params["router-id"], config.params["input-ports"], config.params["outputs"], config.params["timers"])
 
 main()
