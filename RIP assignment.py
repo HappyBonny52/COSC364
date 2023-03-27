@@ -28,6 +28,18 @@ class Config:
         }
         self.__req_params = {'router-id', 'input-ports', 'outputs'}
         
+    def __str__(self):
+        return """
+Config path: {0}
+    \nParamters: 
+    \n    router-id: {1}
+    \n    input-ports: {2}
+    \n    outputs: {3}
+    \n    timers: {4}""".format(self.path, self.params['router-id'],
+                                           self.params['input-ports'],
+                                           self.params['outputs'],
+                                           self.params['timers'],)
+        
     def __isPortValid(self, port):
         """Checks if port is in range of 1024 <= port <= 64000
         returns True if in range and False otherwise"""
@@ -49,9 +61,6 @@ class Config:
         Function to unpack config parameters and stores them in their representative variables
         DOES NOT return anything. The values are stored as attributes of this class
         """
-        
-        #for debug, prints the given arg which should be the path to the config file
-        print("Config Path: ", self.path)
         
         config_file = open(self.path, "r")
         config = config_file.read().split('\n')
@@ -77,13 +86,13 @@ class Config:
                             #router-id is out of range
                             raise ValueError
                     
-                    if param == "input-ports":
+                    elif param == "input-ports":
                         for port in value:
                             if not self.__isPortValid(int(port)):
                                 #input-ports is out of range
                                 raise ValueError
                             
-                    if param == "outputs":
+                    elif param == "outputs":
                         for output in value:
                             parsed = output.split("-")
                             if not self.__isRouterIdValid(int(parsed[2])):
@@ -115,8 +124,8 @@ class Config:
         
       
     
-class RoutingTable:
-    """ Temp skeleton of routing table """
+class RoutingInfo:
+    """ Temp skeleton of routing table entry """
     def __init__(self, destAddress, nextAddress, flag, timers, metric=1):
         self.destAddress = destAddress
         self.metric = metric
@@ -124,7 +133,33 @@ class RoutingTable:
         self.flag = flag
         self.timers = timers
     def __str__(self):
-        return "destAddress: {0}\nmetric: {1}\nnextAddress: {2}\nflag : {3}\ntimers: {4}"    
+        return "destAddress: {0}\nmetric: {1}\nnextAddress: {2}\nflag : {3}\ntimers: {4}".format(self.destAddress,
+                                                                                                 self.metric,
+                                                                                                 self.nextAddress,
+                                                                                                 self.flag,
+                                                                                                 self.timers)
+class RoutingTable:
+    
+    def __init__(self):
+        self.contents = []
+        
+    def __str__(self):
+        output = "Routing table: \n"
+        for i in range(len(self.contents)):
+            output += "    Entry {0}\n[\n{1}\n]\n".format(i, self.contents[i])
+        return output
+        
+    def addEntry(self, entry):
+        self.contents.append(entry)
+        
+    def removeLastEntry(self):
+        self.contents.pop()
+        
+    def removeEntry(self, index):
+        self.contents.pop(index)
+    
+    def removeSpecificEntry(self, entry):
+        self.contents.remove(entry)
     
     
 def bellmanFord(vertices, edges, source):
@@ -168,6 +203,10 @@ def bellmanFord(vertices, edges, source):
 def main():
     config = Config(sys.argv[1])
     config.unpack();
-    print(config.params["router-id"], config.params["input-ports"], config.params["outputs"], config.params["timers"])
+    
+    routingTable = RoutingTable
+    
+    
+    print(config)
 
 main()
