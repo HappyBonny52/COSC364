@@ -34,12 +34,11 @@ class Config:
         self.__req_params = {'router-id', 'input-ports', 'outputs'}
         
     def __str__(self):
-        return """Config path: {0}
-                \nParamters: 
-                \n    router-id: {1}
-                \n    input-ports: {2}
-                \n    outputs: {3}
-                \n    timers: {4}""".format(self.path, self.params['router-id'],
+        return """Config path: {0}\nParamters: 
+             router-id: {1}
+             input-ports: {2}
+             outputs: {3}
+             timers: {4}""".format(self.path, self.params['router-id'],
                                                        self.params['input-ports'],
                                                        self.params['outputs'],
                                                        self.params['timers'],)
@@ -128,32 +127,32 @@ class Config:
         
       
     
-class RoutingInfo:
-    """ Temp skeleton of routing table entry """
-    def __init__(self, destAddress, nextAddress, flag, timers, metric=1):
-        self.destAddress = destAddress
-        self.metric = metric
-        self.nextAddress = nextAddress
-        self.flag = flag
-        self.timers = timers
-    def __str__(self):
-        return "destAddress: {0}\nmetric: {1}\nnextAddress: {2}\nflag : {3}\ntimers: {4}".format(self.destAddress,
-                                                                                                 self.metric,
-                                                                                                 self.nextAddress,
-                                                                                                 self.flag,
-                                                                                                 self.timers)
-
 class RoutingTable:
-    
-    def __init__(self):
-        self.contents = []
-        
+    """ Temp skeleton of routing table entry """
+    def __init__(self, destRtrId, port, cost, hop, timers):
+        self.destRtrId = destRtrId
+        self.port = port
+        self.cost = cost
+        self.hop = hop
+        self.timers = timers
+        self.contents = self.generate_entry()
+
     def __str__(self):
-        output = "Routing table: \n"
+        output = "Routing table______________________________________________________\n"
         for i in range(len(self.contents)):
-            output += "    Entry {0}\n[\n{1}\n]\n".format(i, self.contents[i])
+            output += "|destRtrId: {0}  |  port: {1}  |  cost: {2}  |  hop : {3}  |  timers: {4}|\n".format(self.contents[i][0],
+                                                                                         self.contents[i][1],
+                                                                                         self.contents[i][2],
+                                                                                         self.contents[i][3],
+                                                                                         self.contents[i][4])
+        output += '___________________________________________________________________\n'
         return output
-        
+    def generate_entry(self):
+        entry_lis = []
+        for i in range(len(self.destRtrId)):
+            entry_lis.append([self.destRtrId[i], self.port[i], self.cost[i], self.hop, self.timers])
+        return entry_lis
+            
     def addEntry(self, entry):
         self.contents.append(entry)
         
@@ -209,10 +208,14 @@ class Demon:
         """
         self.routerID = int(router_id[0])
         self.input_port_list = [('',int(input_port)) for input_port in input_ports]
+        self.input_port_lis =[int(input_port) for input_port in input_ports]
         self.output_port_list, self.metric_lis, self.peer_rtr_id_lis = self.decompose_ouput_port(output_ports)
         self.socket_list = [0]*len(input_ports)
         self.entrylis = []
         self.response_pkt = self.generate_rip_res_pkt()
+        print("\nRouting Information\n")
+        print(RoutingTable(self.peer_rtr_id_lis, self.input_port_lis, self.metric_lis, hop = 1, timers = 0))
+
     
     def create_socket(self):
         """Creating UDP sockets and to bind one with each of sockets"""
@@ -226,7 +229,7 @@ class Demon:
         #commond header (consists of command(8bits), version(8bits), must_be_zero(16bits) = routerid)
         command, version, must_be_zero_as_rtr_id = 2, 2, self.routerID
         flatten_entry = [item for sublist in self.compose_rip_entry() for item in sublist]
-        print("flatten_entry : ", flatten_entry)
+        #print("flatten_entry : ", flatten_entry)
         entry_len = len(flatten_entry)
         pkt_len = 3 + entry_len
         res_pkt = bytearray(pkt_len)
@@ -270,17 +273,17 @@ class Demon:
 def main():
     config = Config(sys.argv[1])
     config.unpack()
-    
-    routingTable = RoutingTable
+   
+    #routingTable = RoutingTable
     
     print(config)
     
     demon = Demon( config.params['router-id'],  config.params['input-ports'], config.params['outputs'])
     demon.create_socket()
     
-    print('Input_port_list : ',demon.input_port_list)
-    print('Binded socket with port list : ', demon.socket_list)
-    print('Rip_response_pkt : ', demon.generate_rip_res_pkt().hex())
+    #print('Input_port_list : ',demon.input_port_list)
+    #print('Binded socket with port list : ', demon.socket_list)
+    #print('Rip_response_pkt : ', demon.generate_rip_res_pkt().hex())
 
 
 if __name__ == "__main__":
