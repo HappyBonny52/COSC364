@@ -142,6 +142,7 @@ class RoutingInfo:
                                                                                                  self.nextAddress,
                                                                                                  self.flag,
                                                                                                  self.timers)
+
 class RoutingTable:
     
     def __init__(self):
@@ -251,6 +252,18 @@ class Demon:
             entrylis.append([address_family_identifier, must_be_zero, self.peer_rtr_id_lis[i], must_be_zero, must_be_zero, self.metric_lis[i]])
         #self.entrylis = entrylis
         return entrylis
+
+    def update_routing_information(self):
+        destAddress = destAddress
+        metric = metric
+        nextAddress = nextAddress
+        flag = flag
+        timers = 10
+        RoutingInfo()
+
+    #def interaction_with_routers(self):
+    #    while True:
+
        
        
 
