@@ -2,6 +2,7 @@
 # -*- coding: utf8 -*-
 
 import sys
+import select
 import socket
 import datetime 
 
@@ -33,16 +34,15 @@ class Config:
         self.__req_params = {'router-id', 'input-ports', 'outputs'}
         
     def __str__(self):
-        return """
-Config path: {0}
-    \nParamters: 
-    \n    router-id: {1}
-    \n    input-ports: {2}
-    \n    outputs: {3}
-    \n    timers: {4}""".format(self.path, self.params['router-id'],
-                                           self.params['input-ports'],
-                                           self.params['outputs'],
-                                           self.params['timers'],)
+        return """Config path: {0}
+                \nParamters: 
+                \n    router-id: {1}
+                \n    input-ports: {2}
+                \n    outputs: {3}
+                \n    timers: {4}""".format(self.path, self.params['router-id'],
+                                                       self.params['input-ports'],
+                                                       self.params['outputs'],
+                                                       self.params['timers'],)
         
     def __isPortValid(self, port):
         """Checks if port is in range of 1024 <= port <= 64000
@@ -177,16 +177,11 @@ def bellmanFord(vertices, edges, source):
     takes arguments:
     
     <vertices> : array of length N, where N is the number of vertex in graph, only used for counting purposes so the values don't actually matter
-    
     <edges> : array of (u, v, w) tuples representing edges
-    
     <source> : source vertex index
-    
-    
     returns arrays distance and predecessor
     
     <distance> : the index of each element represents the vertex index and the value of each element represents the total weight to reach that vertex from source
-    
     <predecessor> : the index of each element represents the vertex index and the value of each element represents the vertex index of the least weight to reach the vertex
     
     """
@@ -205,11 +200,18 @@ def bellmanFord(vertices, edges, source):
     return distance, predecessor
 
 class Demon:
-    def __init__(self, input_ports):
-        """Initialize Demon with input ports for creating UDP sockets """
-        #self.input_ports_list = [int(port) for port in input_ports]
+    def __init__(self,  router_id, input_ports, output_ports):
+        """Initialize Demon with input ports for creating UDP sockets 
+        <input_port_list> : tuple form of ('', input port) for binding
+        
+        <socket_list> : list of binded sockets indexed in its corresponding input port
+        """
+        self.routerID = int(router_id[0])
         self.input_port_list = [('',int(input_port)) for input_port in input_ports]
+        self.output_port_list, self.metric_lis, self.peer_rtr_id_lis = self.decompose_ouput_port(output_ports)
         self.socket_list = [0]*len(input_ports)
+        self.entrylis = []
+        self.response_pkt = self.generate_rip_res_pkt()
     
     def create_socket(self):
         """Creating UDP sockets and to bind one with each of sockets"""
@@ -218,6 +220,37 @@ class Demon:
             sock.bind(self.input_port_list[i])
             self.socket_list[i] = sock
         return self.socket_list
+
+    def generate_rip_res_pkt(self):
+        #commond header (consists of command(8bits), version(8bits), must_be_zero(16bits) = routerid)
+        command, version, must_be_zero_as_rtr_id = 2, 2, self.routerID
+        flatten_entry = [item for sublist in self.compose_rip_entry() for item in sublist]
+        print("flatten_entry : ", flatten_entry)
+        entry_len = len(flatten_entry)
+        pkt_len = 3 + entry_len
+        res_pkt = bytearray(pkt_len)
+        res_pkt[0], res_pkt[1], res_pkt[2] = command, version, must_be_zero_as_rtr_id
+        for i in range(entry_len):
+            res_pkt[3+i] = flatten_entry[i]
+        return res_pkt
+
+    def decompose_ouput_port(self, output_ports):
+        splitted_lis = [output_ports[i].split('-') for i in range(len(output_ports))]
+        port_lis, metric_lis, peer_rtr_id_lis = [], [], []
+        for indx in range(len(splitted_lis)):
+            port_lis.append(int(splitted_lis[indx][0]))
+            metric_lis.append(int(splitted_lis[indx][1]))
+            peer_rtr_id_lis.append(int(splitted_lis[indx][2]))
+        return port_lis, metric_lis, peer_rtr_id_lis
+            
+    def compose_rip_entry(self):
+        entrylis = []
+        address_family_identifier = 2
+        must_be_zero = 0
+        for i in range(len(self.output_port_list)):
+            entrylis.append([address_family_identifier, must_be_zero, self.peer_rtr_id_lis[i], must_be_zero, must_be_zero, self.metric_lis[i]])
+        #self.entrylis = entrylis
+        return entrylis
        
        
 
@@ -229,11 +262,12 @@ def main():
     
     print(config)
     
-    demon = Demon(config.params['input-ports'])
+    demon = Demon( config.params['router-id'],  config.params['input-ports'], config.params['outputs'])
     demon.create_socket()
     
     print('Input_port_list : ',demon.input_port_list)
     print('Binded socket with port list : ', demon.socket_list)
+    print('Rip_response_pkt : ', demon.generate_rip_res_pkt().hex())
 
 
 if __name__ == "__main__":
