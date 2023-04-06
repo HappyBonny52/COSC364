@@ -6,6 +6,8 @@ import select
 import socket
 import datetime 
 
+RECV_BUFFSIZE = 1024
+
 class Config:
     """
     Config object initialised with argument string that is the string representation
@@ -209,32 +211,36 @@ class Demon:
         self.input_port_list = [('',int(input_port)) for input_port in input_ports]
         self.input_port_lis =[int(input_port) for input_port in input_ports]
         self.output_port_list, self.metric_lis, self.peer_rtr_id_lis = self.decompose_ouput_port(output_ports)
-        self.socket_list = [0]*len(input_ports)
+        self.socket_list = [0]*len(self.input_port_lis)
         self.entrylis = []
         self.response_pkt = self.generate_rip_res_pkt()
         print("\nRouting Information\n")
         print(RoutingTable(self.peer_rtr_id_lis, self.input_port_lis, self.metric_lis, hop = 1, timers = 0))
-
+        self.generate_rip_res_pkt()
+        self.sending_packet()
     
     def create_socket(self):
         """Creating UDP sockets and to bind one with each of sockets"""
         for i in range(len(self.input_port_list)):
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.bind(self.input_port_list[i])
-            self.socket_list[i] = sock
-        return self.socket_list
+            self.socket_list[i]=sock
+        return self.socket_list   
 
     def generate_rip_res_pkt(self):
         #commond header (consists of command(8bits), version(8bits), must_be_zero(16bits) = routerid)
         command, version, must_be_zero_as_rtr_id = 2, 2, self.routerID
         flatten_entry = [item for sublist in self.compose_rip_entry() for item in sublist]
+        front_rtr_id, back_rtr_id = (must_be_zero_as_rtr_id&0xFF00)>>8, must_be_zero_as_rtr_id&0x00FF
+
         #print("flatten_entry : ", flatten_entry)
         entry_len = len(flatten_entry)
-        pkt_len = 3 + entry_len
+        pkt_len = 4 + entry_len
         res_pkt = bytearray(pkt_len)
-        res_pkt[0], res_pkt[1], res_pkt[2] = command, version, must_be_zero_as_rtr_id
+        res_pkt[0], res_pkt[1], res_pkt[2], res_pkt[3] = command, version, front_rtr_id, back_rtr_id
         for i in range(entry_len):
-            res_pkt[3+i] = flatten_entry[i]
+            #print("entry component{0} : {1}".format(i, flatten_entry[i]))
+            res_pkt[4+i] = flatten_entry[i]
         return res_pkt
 
     def decompose_ouput_port(self, output_ports):
@@ -249,17 +255,38 @@ class Demon:
     def compose_rip_entry(self):
         entrylis = []
         address_family_identifier = 2
-        must_be_zero = 0
+        front_addr_fam_id, back_addr_fam_id = (address_family_identifier&0xFF00)>>8, address_family_identifier&0x00FF
         for i in range(len(self.output_port_list)):
-            entrylis.append([address_family_identifier, must_be_zero, self.peer_rtr_id_lis[i], must_be_zero, must_be_zero, self.metric_lis[i]])
+            first_peer_rtr_id, second_peer_rtr_id =(self.peer_rtr_id_lis[i]&0xFF000000)>>24, (self.peer_rtr_id_lis[i]&0x00FF0000)>>16
+            third_peer_rtr_id, forth_peer_rtr_id = (self.peer_rtr_id_lis[i]&0x0000FF00)>>8, (self.peer_rtr_id_lis[i]&0x000000FF)
+            first_metric, second_metric =(self.metric_lis[i]&0xFF000000)>>24, (self.metric_lis[i]&0x00FF0000)>>16
+            third_metric, forth_metric = (self.metric_lis[i]&0x0000FF00)>>8, (self.metric_lis[i]&0x000000FF)
+            entrylis.append([front_addr_fam_id, back_addr_fam_id, 0x00, 0x00, first_peer_rtr_id, second_peer_rtr_id, third_peer_rtr_id, forth_peer_rtr_id, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, first_metric, second_metric, third_metric, forth_metric])
         #self.entrylis = entrylis
         return entrylis
 
+    def sending_packet(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sending_socket:
+                for i in range(len(self.output_port_list)):
+                    sending_socket.connect(('127.0.0.1', self.output_port_list[i]))
+                    sending_socket.sendto(self.response_pkt, ('127.0.0.1', self.output_port_list[i])) 
+                print(f"sending response_pkt :{self.response_pkt.hex()}")
 
-    #def interaction_with_routers(self):
-    #    while True:
+    def receiving_packet(self):
+        read_socket_lis, write_socket_lis, except_socket_lis = select.select(self.socket_list, [], [])
+        for read_socket in read_socket_lis:
+            for i in range(len(self.input_port_lis)):
+                if read_socket == self.socket_list[i]:
+                    print(f'Received packet from router id : {self.peer_rtr_id_lis[i]} :')
+                    resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
+                    print("  Received response_pkt : ", resp_pkt.hex())
+                        
+                        
+                 
 
-       
+class ManuallyExit(Exception):
+   def __str__(self):
+      return "Program exited"    
        
 
 def main():
@@ -272,10 +299,10 @@ def main():
     
     demon = Demon( config.params['router-id'],  config.params['input-ports'], config.params['outputs'])
     demon.create_socket()
-    
+    demon.receiving_packet()
     #print('Input_port_list : ',demon.input_port_list)
     #print('Binded socket with port list : ', demon.socket_list)
-    #print('Rip_response_pkt : ', demon.generate_rip_res_pkt().hex())
+    #print('Rip_response_pkt : ', demon.compose_rip_entry())
 
 
 if __name__ == "__main__":
