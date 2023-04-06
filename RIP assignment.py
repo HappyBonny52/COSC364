@@ -64,7 +64,6 @@ class Config:
         Function to unpack config parameters and stores them in their representative variables
         DOES NOT return anything. The values are stored as attributes of this class
         """
-        
         config_file = open(self.path, "r")
         config = config_file.read().split('\n')
         config_file.close()
@@ -256,13 +255,6 @@ class Demon:
         #self.entrylis = entrylis
         return entrylis
 
-    def update_routing_information(self):
-        destAddress = destAddress
-        metric = metric
-        nextAddress = nextAddress
-        flag = flag
-        timers = 10
-        RoutingInfo()
 
     #def interaction_with_routers(self):
     #    while True:
