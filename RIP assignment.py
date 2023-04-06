@@ -209,18 +209,20 @@ class Demon:
         """
         self.routerID = int(router_id[0])
         self.input_port_list = [('',int(input_port)) for input_port in input_ports]
-        self.input_port_lis =[int(input_port) for input_port in input_ports]
+        self.input_ports =[int(input_port) for input_port in input_ports]
         self.output_port_list, self.metric_lis, self.peer_rtr_id_lis = self.decompose_ouput_port(output_ports)
-        self.socket_list = [0]*len(self.input_port_lis)
-        self.entrylis = []
+        self.socket_list = [0]*len(self.input_ports)
+        self.entrylis = self.compose_rip_entry()
         self.response_pkt = self.generate_rip_res_pkt()
+        #Print out routing information just for checking 
+        #(This area will be triggered by timer or update event after implementation of timer/updateEvent)
         print("\nRouting Information\n")
-        print(RoutingTable(self.peer_rtr_id_lis, self.input_port_lis, self.metric_lis, hop = 1, timers = 0))
-        self.generate_rip_res_pkt()
+        print(RoutingTable(self.peer_rtr_id_lis, self.input_ports, self.metric_lis, hop = 1, timers = 0))
+        #________________________________________________________________________________________________
         self.sending_packet()
     
     def create_socket(self):
-        """Creating UDP sockets and to bind one with each of sockets"""
+        """Creating UDP sockets and to bind one with each of input_port"""
         for i in range(len(self.input_port_list)):
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             sock.bind(self.input_port_list[i])
@@ -232,18 +234,17 @@ class Demon:
         command, version, must_be_zero_as_rtr_id = 2, 2, self.routerID
         flatten_entry = [item for sublist in self.compose_rip_entry() for item in sublist]
         front_rtr_id, back_rtr_id = (must_be_zero_as_rtr_id&0xFF00)>>8, must_be_zero_as_rtr_id&0x00FF
-
         #print("flatten_entry : ", flatten_entry)
         entry_len = len(flatten_entry)
         pkt_len = 4 + entry_len
         res_pkt = bytearray(pkt_len)
         res_pkt[0], res_pkt[1], res_pkt[2], res_pkt[3] = command, version, front_rtr_id, back_rtr_id
         for i in range(entry_len):
-            #print("entry component{0} : {1}".format(i, flatten_entry[i]))
             res_pkt[4+i] = flatten_entry[i]
         return res_pkt
 
     def decompose_ouput_port(self, output_ports):
+        """Function for splitting output into output_port, metric, peer_rtr_id and create lists of each in corresponding order"""
         splitted_lis = [output_ports[i].split('-') for i in range(len(output_ports))]
         port_lis, metric_lis, peer_rtr_id_lis = [], [], []
         for indx in range(len(splitted_lis)):
@@ -262,7 +263,6 @@ class Demon:
             first_metric, second_metric =(self.metric_lis[i]&0xFF000000)>>24, (self.metric_lis[i]&0x00FF0000)>>16
             third_metric, forth_metric = (self.metric_lis[i]&0x0000FF00)>>8, (self.metric_lis[i]&0x000000FF)
             entrylis.append([front_addr_fam_id, back_addr_fam_id, 0x00, 0x00, first_peer_rtr_id, second_peer_rtr_id, third_peer_rtr_id, forth_peer_rtr_id, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, first_metric, second_metric, third_metric, forth_metric])
-        #self.entrylis = entrylis
         return entrylis
 
     def sending_packet(self):
@@ -273,20 +273,14 @@ class Demon:
                 print(f"sending response_pkt :{self.response_pkt.hex()}")
 
     def receiving_packet(self):
-        read_socket_lis, write_socket_lis, except_socket_lis = select.select(self.socket_list, [], [])
+        read_socket_lis, _, _ = select.select(self.socket_list, [], [])
         for read_socket in read_socket_lis:
-            for i in range(len(self.input_port_lis)):
+            for i in range(len(self.input_ports)):
                 if read_socket == self.socket_list[i]:
                     print(f'Received packet from router id : {self.peer_rtr_id_lis[i]} :')
                     resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
                     print("  Received response_pkt : ", resp_pkt.hex())
                         
-                        
-                 
-
-class ManuallyExit(Exception):
-   def __str__(self):
-      return "Program exited"    
        
 
 def main():
@@ -297,7 +291,7 @@ def main():
     
     print(config)
     
-    demon = Demon( config.params['router-id'],  config.params['input-ports'], config.params['outputs'])
+    demon = Demon(config.params['router-id'],  config.params['input-ports'], config.params['outputs'])
     demon.create_socket()
     demon.receiving_packet()
     #print('Input_port_list : ',demon.input_port_list)
