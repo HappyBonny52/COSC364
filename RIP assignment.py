@@ -1,5 +1,9 @@
+#!/usr/bin/python
+# -*- coding: utf8 -*-
+
 import sys
 import socket
+import datetime 
 
 class Config:
     """
@@ -200,13 +204,37 @@ def bellmanFord(vertices, edges, source):
                         
     return distance, predecessor
 
+class Demon:
+    def __init__(self, input_ports):
+        """Initialize Demon with input ports for creating UDP sockets """
+        #self.input_ports_list = [int(port) for port in input_ports]
+        self.input_port_list = [('',int(input_port)) for input_port in input_ports]
+        self.socket_list = [0]*len(input_ports)
+    
+    def create_socket(self):
+        """Creating UDP sockets and to bind one with each of sockets"""
+        for i in range(len(self.input_port_list)):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.bind(self.input_port_list[i])
+            self.socket_list[i] = sock
+        return self.socket_list
+       
+       
+
 def main():
     config = Config(sys.argv[1])
-    config.unpack();
+    config.unpack()
     
     routingTable = RoutingTable
     
-    
     print(config)
+    
+    demon = Demon(config.params['input-ports'])
+    demon.create_socket()
+    
+    print('Input_port_list : ',demon.input_port_list)
+    print('Binded socket with port list : ', demon.socket_list)
 
-main()
+
+if __name__ == "__main__":
+    main()
