@@ -131,12 +131,12 @@ class Config:
 class RoutingTable:
     """ Temp skeleton of routing table entry """
     def __init__(self, destRtrId, port, cost, hop, timers):
-        self.destRtrId = destRtrId
-        self.port = port
-        self.cost = cost
+        self.destRtrId = destRtrId #list
+        self.port = port #list
+        self.cost = cost #list
         self.hop = hop
         self.timers = timers
-        self.contents = self.generate_entry()
+        self.contents = self.generate_table_entry()
 
     def __str__(self):
         output = "Routing table______________________________________________________\n"
@@ -148,7 +148,7 @@ class RoutingTable:
                                                                                          self.contents[i][4])
         output += '___________________________________________________________________\n'
         return output
-    def generate_entry(self):
+    def generate_table_entry(self):
         entry_lis = []
         for i in range(len(self.destRtrId)):
             entry_lis.append([self.destRtrId[i], self.port[i], self.cost[i], self.hop, self.timers])
@@ -212,8 +212,7 @@ class Demon:
         self.input_ports =[int(input_port) for input_port in input_ports]
         self.output_port_list, self.metric_lis, self.peer_rtr_id_lis = self.decompose_ouput_port(output_ports)
         self.socket_list = [0]*len(self.input_ports)
-        self.entrylis = self.compose_rip_entry()
-        self.response_pkt = self.generate_rip_res_pkt()
+        self.response_pkt = self.generate_rip_response_packet(self.compose_rip_entry())
         #Print out routing information just for checking 
         #(This area will be triggered by timer or update event after implementation of timer/updateEvent)
         print("\nRouting Information\n")
@@ -229,23 +228,62 @@ class Demon:
             self.socket_list[i]=sock
         return self.socket_list   
 
-    def generate_rip_res_pkt(self):
-        #commond header (consists of command(8bits), version(8bits), must_be_zero(16bits) = routerid)
-        command, version, must_be_zero_as_rtr_id = 2, 2, self.routerID
-        flatten_entry = [item for sublist in self.compose_rip_entry() for item in sublist]
-        front_rtr_id, back_rtr_id = (must_be_zero_as_rtr_id&0xFF00)>>8, must_be_zero_as_rtr_id&0x00FF
-        #print("flatten_entry : ", flatten_entry)
-        entry_len = len(flatten_entry)
-        pkt_len = 4 + entry_len
-        res_pkt = bytearray(pkt_len)
-        res_pkt[0], res_pkt[1], res_pkt[2], res_pkt[3] = command, version, front_rtr_id, back_rtr_id
-        for i in range(entry_len):
-            res_pkt[4+i] = flatten_entry[i]
-        return res_pkt
+    def generate_rip_response_packet(self, rip_entry):
+        #   RIP PACKET FORMAT
+        #+--------------------------------------------------------------+
+        #|  command(1 byte) + version (1 byte) +   must_be_zero(2bytes) |
+        #|--------------------------------------------------------------|
+        #|       rip entry(20 bytes) * the number of rip entry          |
+        #+--------------------------------------------------------------+
+        #The number of rip entry can be up to 25(including) 
+        #rip entry will be received as an bytearray from compose_rip_entry() 
+        #and is added to the end of rip packet.
+
+        #components of common header
+        command, version, must_be_zero_as_rtr_id = 2,2,self.routerID
+   
+        #create bytearray for response_packet
+        response_pkt_bytearray = bytearray()
+
+        #adding common header into response_packet(bytearray)
+        response_pkt_bytearray += command.to_bytes(1, 'big')
+        response_pkt_bytearray += version.to_bytes(1, 'big')
+        response_pkt_bytearray += must_be_zero_as_rtr_id.to_bytes(2,'big')
+        #adding rip entry into response_packet(bytearray)
+        response_pkt_bytearray += rip_entry
+        return response_pkt_bytearray
+
+    def compose_rip_entry(self):
+        #   RIP ENTRY FORMAT
+        #+--------------------------------------------------------------+
+        #|  address family identifier(2 bytes) + must be zero (2 bytes) |
+        #|                   IPv4 address (4 bytes)                     |
+        #|                   must be zero (4 bytes)                     |
+        #|                   must be zero (4 bytes)                     |
+        #|                       metric(4 bytes)                        |
+        #+--------------------------------------------------------------+
+        #The number of rip entry can be up to 25(including)
+        entry_bytearray = bytearray()
+        address_family_identifier = 2
+        must_be_zero = 0
+        
+        for i in range(len(self.output_port_list)):#the item in range() will be replaced by lists of list entry contents
+            #first 32 bits of rip entry
+            entry_bytearray += address_family_identifier.to_bytes(2, 'big')
+            entry_bytearray += must_be_zero.to_bytes(2, 'big')
+            # second to fifth of rip entry
+            entry_bytearray += self.peer_rtr_id_lis[i].to_bytes(4, 'big')
+            entry_bytearray += must_be_zero.to_bytes(4, 'big')
+            entry_bytearray += must_be_zero.to_bytes(4, 'big')
+            entry_bytearray += self.metric_lis[i].to_bytes(4, 'big')
+        return entry_bytearray
 
     def decompose_ouput_port(self, output_ports):
         """Function for splitting output into output_port, metric, peer_rtr_id and create lists of each in corresponding order"""
-        splitted_lis = [output_ports[i].split('-') for i in range(len(output_ports))]
+        #output form 
+        #"peer's_input_port - metric(link cost) - peer's router id"
+        #peer's_input_port is equal to current router's output_port
+        splitted_lis = [output_ports[i].split('-') for i in range(len(output_ports))] #split by '-', lists of list 
         port_lis, metric_lis, peer_rtr_id_lis = [], [], []
         for indx in range(len(splitted_lis)):
             port_lis.append(int(splitted_lis[indx][0]))
@@ -253,17 +291,6 @@ class Demon:
             peer_rtr_id_lis.append(int(splitted_lis[indx][2]))
         return port_lis, metric_lis, peer_rtr_id_lis
             
-    def compose_rip_entry(self):
-        entrylis = []
-        address_family_identifier = 2
-        front_addr_fam_id, back_addr_fam_id = (address_family_identifier&0xFF00)>>8, address_family_identifier&0x00FF
-        for i in range(len(self.output_port_list)):
-            first_peer_rtr_id, second_peer_rtr_id =(self.peer_rtr_id_lis[i]&0xFF000000)>>24, (self.peer_rtr_id_lis[i]&0x00FF0000)>>16
-            third_peer_rtr_id, forth_peer_rtr_id = (self.peer_rtr_id_lis[i]&0x0000FF00)>>8, (self.peer_rtr_id_lis[i]&0x000000FF)
-            first_metric, second_metric =(self.metric_lis[i]&0xFF000000)>>24, (self.metric_lis[i]&0x00FF0000)>>16
-            third_metric, forth_metric = (self.metric_lis[i]&0x0000FF00)>>8, (self.metric_lis[i]&0x000000FF)
-            entrylis.append([front_addr_fam_id, back_addr_fam_id, 0x00, 0x00, first_peer_rtr_id, second_peer_rtr_id, third_peer_rtr_id, forth_peer_rtr_id, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, first_metric, second_metric, third_metric, forth_metric])
-        return entrylis
 
     def sending_packet(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sending_socket:
