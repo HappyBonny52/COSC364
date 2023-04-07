@@ -127,32 +127,57 @@ class Config:
                 raise TypeError("PARAMETER <{}> MISSING. PLEASE CHECK CONFIG".format(param))    
         
       
-    
+class RoutingInformation:
+     def __init__(self, router_id, input_ports, outputs):
+        self.routerID = int(router_id[0])
+        self.input_ports =[int(input_port) for input_port in input_ports]
+        #Extract individual info for outputs (peer_input_port, metric, peer_router_id)
+        self.output_port_list, self.metric_list, self.peer_rtr_id_list = self.decompose_ouput_port(outputs)
+        self.hop, self.timers = 1, 0
+        self.contents = self.generate_table_entry()
+        RoutingTable(self.contents, [])
+
+     def decompose_ouput_port(self, outputs):
+         """Function for splitting output into output_port, metric, peer_rtr_id and create lists of each in corresponding order"""
+         #output form 
+         #"peer's_input_port - metric(link cost) - peer's router id"
+         #peer's_input_port is equal to current router's output_port
+         splitted_lis = [outputs[i].split('-') for i in range(len(outputs))] #split by '-', lists of list 
+         ports, metrices, peer_rtr_ids = [], [], []
+         for indx in range(len(splitted_lis)):
+             ports.append(int(splitted_lis[indx][0]))
+             metrices.append(int(splitted_lis[indx][1]))
+             peer_rtr_ids.append(int(splitted_lis[indx][2]))
+         return ports, metrices, peer_rtr_ids
+
+     def generate_table_entry(self):
+         routing_table_entry_lis = []
+         for i in range(len(self.output_port_list)):
+             routing_table_entry_lis.append([self.routerID, self.peer_rtr_id_list[i], self.input_ports[i], self.output_port_list[i], self.metric_list[i], self.hop, self.timers])
+         return routing_table_entry_lis
+
 class RoutingTable:
     """ Temp skeleton of routing table entry """
-    def __init__(self, destRtrId, port, cost, hop, timers):
-        self.destRtrId = destRtrId #list
-        self.port = port #list
-        self.cost = cost #list
-        self.hop = hop
-        self.timers = timers
-        self.contents = self.generate_table_entry()
+    def __init__(self, contents, newEntry = []):
+        self.contents = contents
+        self.new_entry = newEntry
+        #Print out routing information just for checking 
+        #(This area will be triggered by timer or update event after implementation of timer/updateEvent)
+        print(f"\nRouting Information of router {self.contents[0][0]}\n")
+        print(self.__str__())
+        #________________________________________________________________________________________________
 
     def __str__(self):
-        output = "Routing table______________________________________________________\n"
+        output = "Routing table------------------------------------------------------------------------------------+\n"
         for i in range(len(self.contents)):
-            output += "|destRtrId: {0}  |  port: {1}  |  cost: {2}  |  hop : {3}  |  timers: {4}|\n".format(self.contents[i][0],
-                                                                                         self.contents[i][1],
+            output += "|destRtrId: {0}  |  port: {1} (connected to outputport {2})  |  cost: {3}  |  hop : {4}  |  timers: {5}|\n".format(self.contents[i][1],
                                                                                          self.contents[i][2],
                                                                                          self.contents[i][3],
-                                                                                         self.contents[i][4])
-        output += '___________________________________________________________________\n'
+                                                                                         self.contents[i][4],
+                                                                                         self.contents[i][5],
+                                                                                         self.contents[i][6])
+        output += '+------------------------------------------------------------------------------------------------+\n'
         return output
-    def generate_table_entry(self):
-        entry_lis = []
-        for i in range(len(self.destRtrId)):
-            entry_lis.append([self.destRtrId[i], self.port[i], self.cost[i], self.hop, self.timers])
-        return entry_lis
             
     def addEntry(self, entry):
         self.contents.append(entry)
@@ -201,32 +226,30 @@ def bellmanFord(vertices, edges, source):
     return distance, predecessor
 
 class Demon:
-    def __init__(self,  router_id, input_ports, output_ports):
+    def __init__(self,  RoutingInformation):
         """Initialize Demon with input ports for creating UDP sockets 
         <input_port_list> : tuple form of ('', input port) for binding
         
         <socket_list> : list of binded sockets indexed in its corresponding input port
         """
-        self.routerID = int(router_id[0])
-        self.input_port_list = [('',int(input_port)) for input_port in input_ports]
-        self.input_ports =[int(input_port) for input_port in input_ports]
-        self.output_port_list, self.metric_lis, self.peer_rtr_id_lis = self.decompose_ouput_port(output_ports)
-        self.socket_list = [0]*len(self.input_ports)
+        self.routerID = RoutingInformation.routerID
+        self.input_ports = RoutingInformation.input_ports
+        self.output_port_list = RoutingInformation.output_port_list
+        self.metric_list =RoutingInformation.metric_list
+        self.peer_rtr_id_list = RoutingInformation.peer_rtr_id_list
+        self.socket_list = self.create_socket()
         self.response_pkt = self.generate_rip_response_packet(self.compose_rip_entry())
-        #Print out routing information just for checking 
-        #(This area will be triggered by timer or update event after implementation of timer/updateEvent)
-        print("\nRouting Information\n")
-        print(RoutingTable(self.peer_rtr_id_lis, self.input_ports, self.metric_lis, hop = 1, timers = 0))
-        #________________________________________________________________________________________________
-        self.sending_packet()
+
     
     def create_socket(self):
         """Creating UDP sockets and to bind one with each of input_port"""
-        for i in range(len(self.input_port_list)):
+        input_port_addr = [('',int(input_port)) for input_port in self.input_ports]
+        socket_list = []
+        for i in range(len(input_port_addr)):
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.bind(self.input_port_list[i])
-            self.socket_list[i]=sock
-        return self.socket_list   
+            sock.bind(input_port_addr[i])
+            socket_list.append(sock)
+        return socket_list
 
     def generate_rip_response_packet(self, rip_entry):
         #   RIP PACKET FORMAT
@@ -272,25 +295,11 @@ class Demon:
             entry_bytearray += address_family_identifier.to_bytes(2, 'big')
             entry_bytearray += must_be_zero.to_bytes(2, 'big')
             # second to fifth of rip entry
-            entry_bytearray += self.peer_rtr_id_lis[i].to_bytes(4, 'big')
+            entry_bytearray += self.peer_rtr_id_list[i].to_bytes(4, 'big')
             entry_bytearray += must_be_zero.to_bytes(4, 'big')
             entry_bytearray += must_be_zero.to_bytes(4, 'big')
-            entry_bytearray += self.metric_lis[i].to_bytes(4, 'big')
+            entry_bytearray += self.metric_list[i].to_bytes(4, 'big')
         return entry_bytearray
-
-    def decompose_ouput_port(self, output_ports):
-        """Function for splitting output into output_port, metric, peer_rtr_id and create lists of each in corresponding order"""
-        #output form 
-        #"peer's_input_port - metric(link cost) - peer's router id"
-        #peer's_input_port is equal to current router's output_port
-        splitted_lis = [output_ports[i].split('-') for i in range(len(output_ports))] #split by '-', lists of list 
-        port_lis, metric_lis, peer_rtr_id_lis = [], [], []
-        for indx in range(len(splitted_lis)):
-            port_lis.append(int(splitted_lis[indx][0]))
-            metric_lis.append(int(splitted_lis[indx][1]))
-            peer_rtr_id_lis.append(int(splitted_lis[indx][2]))
-        return port_lis, metric_lis, peer_rtr_id_lis
-            
 
     def sending_packet(self):
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sending_socket:
@@ -317,10 +326,11 @@ def main():
     #routingTable = RoutingTable
     
     print(config)
+    routing_info = RoutingInformation(config.params['router-id'],  config.params['input-ports'], config.params['outputs'])
+    Demon(routing_info)
     
-    demon = Demon(config.params['router-id'],  config.params['input-ports'], config.params['outputs'])
-    demon.create_socket()
-    demon.receiving_packet()
+    #demon = Demon(config.params['router-id'],  config.params['input-ports'], config.params['outputs'])
+    #demon.receiving_packet()
     #print('Input_port_list : ',demon.input_port_list)
     #print('Binded socket with port list : ', demon.socket_list)
     #print('Rip_response_pkt : ', demon.compose_rip_entry())
