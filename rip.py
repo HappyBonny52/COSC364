@@ -7,8 +7,8 @@ import socket
 import datetime 
 from threading import Timer
 
-RECV_BUFFSIZE = 1024
-start = True
+RECV_BUFFSIZE = 1024 
+
 class Config:
     """
     Config object initialised with argument string that is the string representation
@@ -121,40 +121,30 @@ class Config:
 class RoutingInformation:
      def __init__(self, router_id, input_ports, output_port_list, metric_list, peer_rtr_id_list, hop_list, timer):
         self.routerID = int(router_id)
-
         self.input_ports =[int(input_port) for input_port in input_ports]
-
+        self.flag = 0
         self.timers = 0
         self.hop = 0
         self.hop_list = hop_list
         self.output_port_list = output_port_list
         self.metric_list = metric_list
         self.peer_rtr_id_list = peer_rtr_id_list
-        if start == True:
-            self.current_contents = self.generate_table_entry()
-            RoutingTable(self.current_contents, [])
-        else:
-            RoutingTable(self.current_contents, self.add_received_info())
-
-     def hop_count(self, port, hop):
-        return hop+1
+        self.table_entry = self.generate_table_entry()
 
      def generate_table_entry(self):
-         routing_table_entry_lis = []
-         for i in range(len(self.output_port_list)):
-             routing_table_entry_lis.append([self.routerID, self.peer_rtr_id_list[i], self.input_ports[i], self.output_port_list[i], self.metric_list[i], self.hop_list[i], self.timers])
-         return routing_table_entry_lis
+        entry = []
+        for i in range(len(self.output_port_list)):
+            entry.append([self.routerID, self.peer_rtr_id_list[i], self.input_ports[i], self.output_port_list[i], self.metric_list[i], self.hop_list[i], self.timers])
+        return entry
 
-     def add_received_info(self, entry):
-         for i in range(len(self.output_port_list)):
-             entry.append([self.routerID, self.peer_rtr_id_list[i], self.input_ports[i], self.output_port_list[i], self.metric_list[i], self.hop_list[i], self.timers])
-         return entry
 
 class RoutingTable:
     """ Temp skeleton of routing table entry """
-    def __init__(self, contents, newEntry):
+    def __init__(self, contents, new_entry):
         self.contents = contents
-        self.new_entry = newEntry
+        self.new_entry = new_entry
+        self.addEntry(self.new_entry)
+        #self.update_entry()
         #Print out routing information just for checking 
         #(This area will be triggered by timer or update event after implementation of timer/updateEvent)
         print(f"\nRouting Information of router {self.contents[0][0]}\n")
@@ -162,7 +152,7 @@ class RoutingTable:
         #________________________________________________________________________________________________
 
     def __str__(self):
-        output = "Routing table-------------------------------------------------------------------------+\n"
+        output = "Routing table------------------------------------------------------------------------+\n"
         for i in range(len(self.contents)):
             output += "|destRtrId: {0}  |  port: {1} (connected to outputport {2})  |  cost: {3}  |  hop : {4}  |\n".format(self.contents[i][1],
                                                                                          self.contents[i][2],
@@ -170,11 +160,19 @@ class RoutingTable:
                                                                                          self.contents[i][4],
                                                                                          self.contents[i][5]
                                                                                          )
-        output += '+-------------------------------------------------------------------------------------+\n'
+        output += '+------------------------------------------------------------------------------------+\n'
         return output
+
+    # update_entry(self):
+    #    #[0 : routerID, 1: self.desID, 2: self.input_ports, 3:output_port, 4: metric, 5:hop_list, 6:timers])
+    #    for i in range(len(self.new_entry)):
+    #        for j in range(len(self.contents)):
+    #            if self.new_entry[i][1] not in self.contents[j][0]
+                
             
+        
     def addEntry(self, entry):
-        self.contents.append(self.new_entry)
+        self.contents += entry
         
     def removeLastEntry(self):
         self.contents.pop()
@@ -226,6 +224,7 @@ class Demon:
         
         <socket_list> : list of binded sockets indexed in its corresponding input port
         """
+        self.currentTable = RoutingInformation.table_entry
         self.routerID = RoutingInformation.routerID
         self.input_ports = RoutingInformation.input_ports
         self.output_port_list = RoutingInformation.output_port_list
@@ -236,6 +235,7 @@ class Demon:
         self.response_pkt = self.generate_rip_response_packet(self.compose_rip_entry())
         self.info_exchange_to_neighbors()
         self.response_msg = None
+        
 
     
     def create_socket(self):
@@ -327,7 +327,8 @@ class Demon:
             metrices.append(cost_and_hop[0])
             peerids.append(int.from_bytes(packet[(8+20*i):(12+20*i)], "big"))
             hops.append(cost_and_hop[1])
-        RoutingInformation(cur_rtr, input_ports, outputs, metrices, peerids, hops, 0)
+        new = RoutingInformation(cur_rtr, input_ports, outputs, metrices, peerids, hops, 0)
+        RoutingTable(self.currentTable, new.table_entry)
                             #Demon(routing_info)
                             #router_id, input_ports, output_port_list, metric_list, peer_rtr_id_list, hop_list
 
@@ -361,7 +362,7 @@ class Demon:
         try:
             while True:
                 print("started")
-                start = False
+                
                 self.send_packet()
                 self.receive_packet()
                 
@@ -391,11 +392,11 @@ def decompose_ouput_port(outputs):
        
 
 def main():
+    start = 0
     config = Config(sys.argv[1])
     config.unpack()
    
     #routingTable = RoutingTable
-    
     print(config)
     routing_info = RoutingInformation(int(config.params['router-id'][0]),  config.params['input-ports'], 
     decompose_ouput_port(config.params['outputs'])[0], decompose_ouput_port(config.params['outputs'])[1], decompose_ouput_port(config.params['outputs'])[2], decompose_ouput_port(config.params['outputs'])[3], 0)
