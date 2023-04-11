@@ -4,7 +4,6 @@
 import sys
 import select
 import socket
-import datetime 
 import random as rand
 from threading import Timer
 
@@ -149,8 +148,6 @@ class Demon:
         """Initialize Demon with input ports for creating UDP sockets 
         <socket_list> : list of binded sockets indexed in its corresponding input port
         """
-        #there are some self.xx variables that can be removed and replaced to Router.xx
-        #Planning to cleaner variables when clean up codes in Demon
         if timers:
             self.timers = {'periodic':int(timers[0]),
                            'timeout':int(timers[1]),
@@ -190,6 +187,7 @@ class Demon:
                                                                                          contents[i]['metric']
                                                                                          )
         display += '+--------------------------------------------------------------+\n'
+        print(display)
         return display
         
     def generate_table_entry(self, entry, receive_from):
@@ -202,7 +200,7 @@ class Demon:
                             'output' : outputs[i], 
                             'metric' : metrics[i]})
         if receive_from == self.router.rtr_id:
-            print(self.display_table(content))
+            self.display_table(content)
         return content
 
 
@@ -224,7 +222,7 @@ class Demon:
                         update.append(new)
                     
         self.cur_table = update
-        print(self.display_table(self.cur_table))
+        self.display_table(self.cur_table)
         return update
 
 
@@ -288,8 +286,7 @@ class Demon:
         return rip_entry
    
     def send_packet(self):
-        #Triggered update and randomization of regular update need to be implemented
-        #This timer below is regular update happening at the same time (For checking purpose). ->need to be modified
+        #randomized periodic update for sending packet
         period = self.timers['periodic'] + rand.randint(-5,5)
         Timer(period, self.send_packet).start()
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sending_socket:
@@ -297,7 +294,7 @@ class Demon:
                     sending_socket.connect(('127.0.0.1', self.router.outputs[i]))
                     customized_packet = self.split_horizon(self.router.outputs[i]) #customized_packet for each output
                     sending_socket.sendto(customized_packet, ('127.0.0.1', self.router.outputs[i])) 
-                print(f"sending response packet ...... ")#:{self.response_pkt.hex()}")
+                print(f"sending response packet ...... ")
 
     def split_horizon(self, port):
         routingTable = self.cur_table #need to be dictionarys in list
@@ -320,10 +317,7 @@ class Demon:
 
     def unpack_received_packet(self, received_pkt, receive_from):
         #received_from the the peer router id
-        inputs = []
-        outputs = [] 
-        metrics = [] # link cost
-        dest_ids = [] # destination self.router
+        inputs, outputs, metrics, dest_ids = [], [], [], []
         
         for i in range((len(received_pkt)-4)// 20):
             inputs.append(self.router.inputs[self.router.peer_rtr_id.index(receive_from)])
