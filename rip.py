@@ -120,57 +120,22 @@ class Config:
 class Router:
     """For this router to have its own information based on config file"""
     def __init__(self,  rtrId, inputs, outputs):
-        self.rtrId = rtrId
-        self.inputs = [input_port for input_port in inputs]
-        self.outputs, self.metrics, self.peer_rtr_id = self.decompose_output(outputs)
         
-
-        self.initial_info = RoutingInformation(self.rtrId, self.inputs,  self.outputs, self.metrics, self.peer_rtr_id, 0)
-        self.initial_table = self.initial_info.generate_table_entry()
-        self.initial_display = RoutingTable(None, self.initial_table, [], self.rtrId)
-        print(f"Router ID : {self.rtrId}")
-        print(self.initial_display)
+        self.rtr_id = rtrId # of type int
+        self.inputs = [input_port for input_port in inputs] #list
+        self.output = self.decompose_output(outputs) #list
+        self.outputs = self.output[0] #list
+        self.metrics = self.output[1] #list
+        self.peer_rtr_id = self.output[2] #list
+        
     
     def decompose_output(self, outputs):
-        """
-        split output format by '-' and sort by each item into list
-        # output format
-        # peer's_input_port - metric(link cost) - peer's router id (peer's_input_port is equal to current router's output_port)
-        """
+        """split output format by '-' and sort by each item into list
+        # output format [peer's_input_port - metric(link cost) - peer's router id (peer's_input_port is equal to current router's output_port)]"""
         #split output by '-'
         split_output = [outputs[i].split('-') for i in range(len(outputs))] 
-        
-        ports, metrices, peer_rtr_ids = [], [], []
-        for i in range(len(split_output)):
-            ports.append(int(split_output[i][0]))
-            metrices.append(int(split_output[i][1]))
-            peer_rtr_ids.append(int(split_output[i][2]))
-
-        #return three lists
-        #return [ports], [metrices], [peer_rtr_ids]
-        return ports, metrices, peer_rtr_ids
-        
-class RoutingInformation:
-     def __init__(self, router_id, input_ports, output_port_list, metric_list, peer_rtr_id_list, timer):
-        self.routerID = int(router_id)
-        self.input_ports =[int(input_port) for input_port in input_ports]
-        self.flag = 0
-        self.timers = 0
-        self.output_port_list = output_port_list
-        self.metric_list = metric_list
-        self.peer_rtr_id_list = peer_rtr_id_list
-        self.new_entry = self.generate_table_entry()
-
-     def generate_table_entry(self):
-        entry = []
-        for i in range(len(self.output_port_list)):
-            entry.append({'router-id' : self.routerID, 
-                          'dest-rtr' : self.peer_rtr_id_list[i], 
-                          'input' : self.input_ports[i], 
-                          'output' : self.output_port_list[i], 
-                          'metric' : self.metric_list[i], 
-                          'timer' : self.timers})
-        return entry
+        #return [ports, metrics, peer_rtr_ids]
+        return [[int(split_output[0][i]), int(split_output[1][i]), int(split_output[2][i])] for i in range(len(split_output))]
 
 
 class RoutingTable:
@@ -182,20 +147,7 @@ class RoutingTable:
         self.contents = contents
         self.new_entry = new_entry
         self.table = self.update_entry(new_entry, received_from)
-        
-
-    def __str__(self):
-        if self.router!=None :
-            print(f"Router ID : {self.router.rtrId}") 
-        output = "Routing table--------------------------------------------------+\n"
-        for i in range(len(self.contents)):
-            output += "|destRtrId: {0}  |  port: {1} (next-hop : {2})  |  Metric : {3}  |\n".format(self.contents[i]['dest-rtr'],
-                                                                                         self.contents[i]['input'],
-                                                                                         self.contents[i]['output'],
-                                                                                         self.contents[i]['metric']
-                                                                                         )
-        output += '+--------------------------------------------------------------+\n'
-        return output
+ 
     
     def update_entry(self, given_entry, receive_from):
         entry = self.contents + given_entry
@@ -210,7 +162,7 @@ class RoutingTable:
                     dest.append(entry[i]['dest-rtr'])
                     final_content.append(entry[i])
 
-                if (entry[i]['dest-rtr'] not in dest) and (entry[i]['dest-rtr'] != self.router.rtrId) :
+                if (entry[i]['dest-rtr'] not in dest) and (entry[i]['dest-rtr'] != self.Router.rtr_id) :
                     dest.append(entry[i]['dest-rtr'])
                     entry[i]['input'] = self.router.inputs[self.router.peer_rtr_id.index(receive_from)]
                     entry[i]['output'] = self.router.outputs[self.router.peer_rtr_id.index(receive_from)]
@@ -233,67 +185,24 @@ class RoutingTable:
             #print("final contents ? ", self.contents)
             print(self.__str__())
             return final_content
-           
-     
-def bellmanFord(vertices, edges, source):
-    """
-    BellmanFord algorithm implemented with the definition from Wikipedia:
-    https://en.wikipedia.org/wiki/Bellman%E2%80%93Ford_algorithm
-    
-    This implementation does not consider the possibility of negative weight cycles
-    as negative weight would not be possible in a routing context.
-    
-    takes arguments:
-    
-    <vertices> : array of length N, where N is the number of vertex in graph, only used for counting purposes so the values don't actually matter
-    <edges> : array of (u, v, w) tuples representing edges
-    <source> : source vertex index
-    returns arrays distance and predecessor
-    
-    <distance> : the index of each element represents the vertex index and the value of each element represents the total weight to reach that vertex from source
-    <predecessor> : the index of each element represents the vertex index and the value of each element represents the vertex index of the least weight to reach the vertex
-    
-    """
-    distance = [ float('inf') for i in range(len(vertices))]
-    predecessor = [ None for i in range(len(vertices))]
-    distance[source] = 0
-    
-        
-    for i in range(len(vertices) - 1):
-        for edge in edges:
-            u, v, w = edge
-            if distance[u] + w < distance[v]:
-                distance[v] = distance[u] + w
-                predecessor[v] = u
-                        
-    return distance, predecessor
-
 
 
 class Demon:
-    def __init__(self, Router, RoutingInformation, RoutingTable):
+    def __init__(self, Router):
         """Initialize Demon with input ports for creating UDP sockets 
         <socket_list> : list of binded sockets indexed in its corresponding input port
         """
         #there are some self.xx variables that can be removed and replaced to Router.xx
         #Planning to cleaner variables when clean up codes in Demon
-        self.response_msg = None
-        self.poison = False
         self.router = Router
-        self.currentTable = RoutingTable.table
-        self.routerID = RoutingInformation.routerID
-        self.input_ports = RoutingInformation.input_ports
-        self.output_port_list = RoutingInformation.output_port_list
-        self.metric_list = RoutingInformation.metric_list
-        self.peer_rtr_id_list = RoutingInformation.peer_rtr_id_list
+        self.cur_table = self.generate_table_entry([self.router.peer_rtr_id, self.router.inputs, self.router.outputs, self.router.metrics], self.router.rtr_id)  #need to be dictionarys in list
         self.socket_list = self.create_socket()
         self.response_pkt = None
-        self.info_exchange_to_neighbors()
-        
-    
+        self.packet_exchange()
+
     def create_socket(self):
         """Creating UDP sockets and to bind one with each of input_port"""
-        input_port_addr = [('', int(input_port)) for input_port in self.input_ports]
+        input_port_addr = [('', int(input_port)) for input_port in self.router.inputs]
         socket_list = []
         for i in range(len(input_port_addr)):
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -301,7 +210,31 @@ class Demon:
             socket_list.append(sock)
         return socket_list
 
-    def generate_rip_response_packet(self, rip_entry):
+    def display_table(self, contents):
+        display = f"\nRouting table of router {self.router.rtr_id}--------------------------------------+\n"
+        for i in range(len(contents)):
+            display += "|destRtrId: {0}  |  port: {1} (next-hop : {2})  |  Metric : {3}  |\n".format(contents[i]['dest'],
+                                                                                         contents[i]['input'],
+                                                                                         contents[i]['output'],
+                                                                                         contents[i]['metric']
+                                                                                         )
+        display += '+--------------------------------------------------------------+\n'
+        return display
+        
+    def generate_table_entry(self, entry, receive_from):
+       content = []
+       dest, inputs, outputs, metrics = entry[0], entry[1], entry[2], entry[3]
+       for i in range(len(entry[0])):
+           content.append({'self.router-id' : receive_from, 
+                             'dest' : dest[i], 
+                             'input' : inputs[i], 
+                             'output' : outputs[i], 
+                             'metric' : metrics[i]})
+       if receive_from == self.router.rtr_id:
+           print(self.display_table(content))
+       return content
+
+    def rip_response_packet(self, rip_entry):
         """
         #   RIP PACKET FORMAT
         #+--------------------------------------------------------------+
@@ -314,20 +247,20 @@ class Demon:
         #and is added to the end of rip packet.
         """
         #components of common header
-        command, version, must_be_zero_as_rtr_id = 2, 2, self.routerID
+        command, version, must_be_zero_as_rtr_id = 2, 2, self.router.rtr_id
    
         #create bytearray for response_packet
-        response_pkt_bytearray = bytearray()
+        resp_pkt = bytearray()
 
         #adding common header into response_packet(bytearray)
-        response_pkt_bytearray += command.to_bytes(1, 'big')
-        response_pkt_bytearray += version.to_bytes(1, 'big')
-        response_pkt_bytearray += must_be_zero_as_rtr_id.to_bytes(2,'big')
+        resp_pkt += command.to_bytes(1, 'big')
+        resp_pkt += version.to_bytes(1, 'big')
+        resp_pkt += must_be_zero_as_rtr_id.to_bytes(2,'big')
         #adding rip entry into response_packet(bytearray)
-        response_pkt_bytearray += rip_entry
-        return response_pkt_bytearray
+        resp_pkt += rip_entry
+        return resp_pkt
 
-    def compose_rip_entry(self, destID, metrics):
+    def compose_rip_entry(self, dest_id, metrics):
         """
         #   RIP ENTRY FORMAT
         #+--------------------------------------------------------------+
@@ -339,97 +272,98 @@ class Demon:
         #+--------------------------------------------------------------+
         #The number of rip entry can be up to 25(including)
         """
-
-        entry_bytearray = bytearray()
-        address_family_identifier = 2
+        rip_entry = bytearray()
+        afi = 0 #afi = address family identifier
         must_be_zero = 0
         
-        for i in range(len(destID)): #the item in range() will be replaced by lists of list entry contents
+        for i in range(len(dest_id)): #the item in range() will be replaced by lists of list entry contents
             #first 32 bits of rip entry
-            entry_bytearray += address_family_identifier.to_bytes(2, 'big')
-            entry_bytearray += must_be_zero.to_bytes(2, 'big')
+            rip_entry += afi.to_bytes(2, 'big')
+            rip_entry += must_be_zero.to_bytes(2, 'big')
             # second to fifth of rip entry
-            entry_bytearray += destID[i].to_bytes(4, 'big')
-            entry_bytearray += must_be_zero.to_bytes(4, 'big')
-            entry_bytearray += must_be_zero.to_bytes(4, 'big')
-            entry_bytearray += metrics[i].to_bytes(4, 'big')
-        return entry_bytearray
+            rip_entry += dest_id[i].to_bytes(4, 'big')
+            rip_entry += must_be_zero.to_bytes(4, 'big')
+            rip_entry += must_be_zero.to_bytes(4, 'big')
+            rip_entry += metrics[i].to_bytes(4, 'big')
+        return rip_entry
    
     def send_packet(self):
         #Triggered update and randomization of regular update need to be implemented
         #This timer below is regular update happening at the same time (For checking purpose). ->need to be modified
         Timer(7, self.send_packet).start()
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sending_socket:
-                for i in range(len(self.output_port_list)):
-                    sending_socket.connect(('127.0.0.1', self.output_port_list[i]))
-                    sending_socket.sendto(self.split_horizon(self.output_port_list[i]), ('127.0.0.1', self.output_port_list[i])) 
+                for i in range(len(self.router.output)):
+                    sending_socket.connect(('127.0.0.1', self.router.outputs[i]))
+                    customized_packet = self.split_horizon(self.router.outputs[i]) #customized_packet for each output
+                    sending_socket.sendto(customized_packet, ('127.0.0.1', self.router.outputs[i])) 
                 print(f"sending response packet ...... ")#:{self.response_pkt.hex()}")
 
     def split_horizon(self, port):
-        routingTable = self.currentTable
+        routingTable = self.cur_table #need to be dictionarys in list
         output = []
         dest = []
         metric = []
         for i in range(len(routingTable)):
             if routingTable[i]['output'] != port:
                 output.append(routingTable[i]['output'])
-                dest.append(routingTable[i]['dest-rtr'])
+                dest.append(routingTable[i]['dest'])
                 metric.append(routingTable[i]['metric'])
 
-        packet = self.generate_rip_response_packet(self.compose_rip_entry(dest, metric))
-        return packet
+        customized_packet = self.rip_response_packet(self.compose_rip_entry(dest, metric))
+        return customized_packet
     
     def is_packet_valid(self, packet):
         """"For packet validity check"""
         # Not implemented yet
         return packet
 
-    def unpack_received_packet(self, cur_rtr, packet, input_port, output_port, receive_from):
-        input_ports = []
-        outputs = [] 
-        metrices = [] #link cost
-        peerids = [] #dest router
-        
-        for i in range((len(packet)-4)// 20):
-            input_ports.append(input_port)
-            outputs.append(output_port)
-            metrices.append(int.from_bytes(packet[(20+20*i):(24+20*i)], "big"))
-            peerids.append(int.from_bytes(packet[(8+20*i):(12+20*i)], "big"))
+    
 
-        new = RoutingInformation(cur_rtr, input_ports, outputs, metrices, peerids, 0)
-        RoutingTable(self.router, self.currentTable, new.new_entry, receive_from)
-                            
+    def unpack_received_packet(self, received_pkt, receive_from):
+        #received_from the the peer router id
+        inputs = []
+        outputs = [] 
+        metrics = [] # link cost
+        dest_ids = [] # destination self.router
+        
+        for i in range((len(received_pkt)-4)// 20):
+            inputs.append(self.router.inputs[self.router.peer_rtr_id.index(receive_from)])
+            outputs.append(self.router.outputs[self.router.peer_rtr_id.index(receive_from)])
+            metrics.append(int.from_bytes(received_pkt[(20+20*i):(24+20*i)], "big"))
+            dest_ids.append(int.from_bytes(received_pkt[(8+20*i):(12+20*i)], "big"))
+
+        contents = [dest_ids, inputs, outputs, metrics]
+        return self.generate_table_entry(contents, receive_from)
 
 
     def receive_packet(self):
         while True:
             read_socket_lis, _, _ = select.select(self.socket_list, [], [])
             for read_socket in read_socket_lis:
-                for i in range(len(self.input_ports)):
+                for i in range(len(self.router.inputs)):
                     if read_socket == self.socket_list[i]:
-                        print(f'\nReceived packet from router id : {self.peer_rtr_id_list[i]}')
+                        print(f'\nReceived packet from router id : {self.router.peer_rtr_id[i]}')
                         resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
                         #print("  Received response_pkt : ") #, resp_pkt.hex())
 
                         try:
-                            self.response_msg = self.is_packet_valid(resp_pkt)
+                            self.response_pkt = self.is_packet_valid(resp_pkt)
                         except Exception as e:
                             print(e)
                             print("Response Packet check has been failed.")
-                            print("Discard the received response packet.\n")
+                            print("Discard the received packet.\n")
                         else: 
                             #for checking what entries I received
-                            for j in range((len(self.response_msg)-4)// 20):
-                                print("----Received entries [destRtr : {0}, next-hop : {1}, metric : {2}]\n".format( int.from_bytes(self.response_msg[(8+20*j):(12+20*j)], "big"),
-                                self.output_port_list[i], int.from_bytes(self.response_msg[(20+20*j):(24+20*i)], "big")))
-                            self.unpack_received_packet(self.routerID, self.response_msg, self.input_ports[i], self.output_port_list[i], self.peer_rtr_id_list[i]) 
+                            for j in range((len(self.response_pkt)-4)// 20):
+                                print("----Received entries [destRtr : {0}, next-hop : {1}, metric : {2}]\n".format( int.from_bytes(self.response_pkt[(8+20*j):(12+20*j)], "big"),
+                                self.router.outputs[i], int.from_bytes(self.response_pkt[(20+20*j):(24+20*i)], "big")))
+                            receive_from = int.from_bytes(self.response_pkt[2:4], "big")
+                            self.unpack_received_packet(self.response_pkt, receive_from) 
                             
 
-
-    def info_exchange_to_neighbors(self):
+    def packet_exchange(self):
         try:
             while True:
-                print("started")
                 
                 self.send_packet()
                 self.receive_packet()
@@ -450,9 +384,9 @@ def main():
     config = Config(sys.argv[1])
     config.unpack()
     print(config)
-
-    router = Router(int(config.params['router-id'][0]),  config.params['input-ports'], config.params['outputs'])
-    routing = Demon(router, router.initial_info, router.initial_display)
+    
+    router = Router(int(config.params['router-id'][0]), config.params['input-ports'], config.params['outputs'])
+    rip_routing = Demon(router)
 
 
 
