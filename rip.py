@@ -5,6 +5,7 @@ import sys
 import select
 import socket
 import datetime 
+import random as rand
 from threading import Timer
 
 RECV_BUFFSIZE = 1024 
@@ -188,17 +189,30 @@ class RoutingTable:
 
 
 class Demon:
-    def __init__(self, Router):
+    def __init__(self, Router, timers=None):
         """Initialize Demon with input ports for creating UDP sockets 
         <socket_list> : list of binded sockets indexed in its corresponding input port
         """
         #there are some self.xx variables that can be removed and replaced to Router.xx
         #Planning to cleaner variables when clean up codes in Demon
+        if timers:
+            self.timers = {'periodic':int(timers[0]),
+                           'timeout':int(timers[1]),
+                           'garbage-collection':int(timers[2])}   
+        else:
+            self.timers = {'periodic':6,
+                           'timeout':36,
+                           'garbage-collection':24}
         self.router = Router
         self.cur_table = self.generate_table_entry([self.router.peer_rtr_id, self.router.inputs, self.router.outputs, self.router.metrics], self.router.rtr_id)  #need to be dictionarys in list
         self.socket_list = self.create_socket()
         self.response_pkt = None
         self.packet_exchange()
+
+
+    def timeout(self):
+        Timer(self.timers['timeout'], collect_garbage).start()
+        
 
     def create_socket(self):
         """Creating UDP sockets and to bind one with each of input_port"""
@@ -222,17 +236,17 @@ class Demon:
         return display
         
     def generate_table_entry(self, entry, receive_from):
-       content = []
-       dest, inputs, outputs, metrics = entry[0], entry[1], entry[2], entry[3]
-       for i in range(len(entry[0])):
-           content.append({'self.router-id' : receive_from, 
-                             'dest' : dest[i], 
-                             'input' : inputs[i], 
-                             'output' : outputs[i], 
-                             'metric' : metrics[i]})
-       if receive_from == self.router.rtr_id:
-           print(self.display_table(content))
-       return content
+        content = []
+        dest, inputs, outputs, metrics = entry[0], entry[1], entry[2], entry[3]
+        for i in range(len(entry[0])):
+            content.append({'self.router-id' : receive_from, 
+                              'dest' : dest[i], 
+                              'input' : inputs[i], 
+                              'output' : outputs[i], 
+                              'metric' : metrics[i]})
+        if receive_from == self.router.rtr_id:
+            print(self.display_table(content))
+        return content
 
     def rip_response_packet(self, rip_entry):
         """
@@ -290,7 +304,8 @@ class Demon:
     def send_packet(self):
         #Triggered update and randomization of regular update need to be implemented
         #This timer below is regular update happening at the same time (For checking purpose). ->need to be modified
-        Timer(7, self.send_packet).start()
+        period = self.timers['periodic'] + rand.randint(-5,5)
+        Timer(period, self.send_packet).start()
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sending_socket:
                 for i in range(len(self.router.output)):
                     sending_socket.connect(('127.0.0.1', self.router.outputs[i]))
@@ -314,8 +329,8 @@ class Demon:
     
     def is_packet_valid(self, packet):
         """"For packet validity check"""
-        # Not implemented yet
-        return packet
+        #Temp
+        return True
 
     
 
@@ -380,7 +395,13 @@ def main():
     print(config)
     
     router = Router(int(config.params['router-id'][0]), config.params['input-ports'], config.params['outputs'])
-    rip_routing = Demon(router)
+    if config.params['timers']:
+        print("Timer present")
+        rip_routing = Demon(router, config.params['timers'])
+    else:
+        print("Timer absent")
+        rip_routing = Demon(router)
+    
 
 
 
