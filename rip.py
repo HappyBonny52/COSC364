@@ -345,20 +345,14 @@ class Demon:
                         print(f'\nReceived packet from router id : {self.router.peer_rtr_id[i]}')
                         resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
                         #print("  Received response_pkt : ") #, resp_pkt.hex())
-
-                        try:
-                            self.response_pkt = self.is_packet_valid(resp_pkt)
-                        except Exception as e:
-                            print(e)
-                            print("Response Packet check has been failed.")
-                            print("Discard the received packet.\n")
-                        else: 
+                        if self.is_packet_valid(resp_pkt):
+                            self.response_pkt = resp_pkt
                             #for checking what entries I received
                             for j in range((len(self.response_pkt)-4)// 20):
                                 print("----Received entries [destRtr : {0}, next-hop : {1}, metric : {2}]\n".format( int.from_bytes(self.response_pkt[(8+20*j):(12+20*j)], "big"),
                                 self.router.outputs[i], int.from_bytes(self.response_pkt[(20+20*j):(24+20*i)], "big")))
-                            receive_from = int.from_bytes(self.response_pkt[2:4], "big")
-                            self.unpack_received_packet(self.response_pkt, receive_from) 
+                                receive_from = int.from_bytes(self.response_pkt[2:4], "big")
+                                self.unpack_received_packet(self.response_pkt, receive_from) 
                             
 
     def packet_exchange(self):
