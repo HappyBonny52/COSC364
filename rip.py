@@ -8,6 +8,7 @@ import random as rand
 from threading import Timer
 import threading
 
+
 RECV_BUFFSIZE = 1024 
 
 class Config:
@@ -161,9 +162,12 @@ class Demon:
                            'garbage-collection':24}
         self.router = Router
         self.is_poisoned = False
-        self.cur_table = self.generate_table_entry([self.router.peer_rtr_id, self.router.inputs, self.router.outputs, self.router.metrics], self.router.rtr_id)  #need to be dictionarys in list
+        self.cur_table = [{ 'dest' : self.router.rtr_id, 
+                            'next-hop' : self.router.rtr_id, 
+                            'metric' : 0}]
         self.socket_list = self.create_socket()
-        self.response_pkt = None
+        self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
+        self.display_table(self.cur_table)
         self.packet_exchange()
     
     def remove_entry(self, dst_id):
@@ -219,59 +223,53 @@ class Demon:
         return socket_list
 
     def display_table(self, contents):
-        display = f"\nRouting table of router {self.router.rtr_id}\n+--------------------------------------------------------------+\n"
+        display = f"\nRouting table of router {self.router.rtr_id}\n"
+        display += '+-------------------------------------------------------------------+\n'
         for i in range(len(contents)):
-            display += "|destRtrId: {0}  |  port: {1} (next-hop : {2})  |  Metric : {3}  |\n".format(contents[i]['dest'],
-                                                                                         contents[i]['input'],
-                                                                                         contents[i]['output'],
-                                                                                         contents[i]['metric']
-                                                                                         )
-        display += '+--------------------------------------------------------------+\n'
+            space = '  ' if contents[i]['metric'] < 10 else ' '
+            display += "|   Destination : router {0}  |  Next-hop : router {1}  |  Metric : {2} {3}|\n".format(contents[i]['dest'],
+                                                                                                         contents[i]['next-hop'],
+                                                                                                         contents[i]['metric'],
+                                                                                                         space)
+        display += '+-------------------------------------------------------------------+\n'
         print(display)
-        return display
         
-    def generate_table_entry(self, entry, receive_from):
+    def generate_table_entry(self, entry):
         content = []
-        dest, inputs, outputs, metrics = entry[0], entry[1], entry[2], entry[3]
+        dest, next_hop, metrics = entry[0], entry[1], entry[2]
         for i in range(len(entry[0])):
-            content.append({'rtr_id' : self.router.rtr_id, 
-                            'dest' : dest[i], 
-                            'input' : inputs[i], 
-                            'output' : outputs[i], 
+            content.append({'dest' : dest[i], 
+                            'next-hop' : next_hop[i], 
                             'metric' : metrics[i]})
-        if receive_from == self.router.rtr_id:
-            self.display_table(content)
         return content
 
 
     def update_entry(self, current_table, new_entry, receive_from):
-        link_cost = self.router.metrics[self.router.peer_rtr_id.index(receive_from)]
         update = current_table
+        link_cost = self.router.metrics[self.router.peer_rtr_id.index(receive_from)]
         dests = [update[i]['dest'] for i in range(len(update))]
+
+            
         for i in range(len(new_entry)):
             if (new_entry[i]['dest'] not in dests) and (new_entry[i]['dest'] != self.router.rtr_id):
-                self.timeout_check(new_entry[i]['dest'])
-                self.remove_garbage_collection(new_entry[i]['dest'])
-                new = self.modify_entry(new_entry[i], self.router, link_cost, receive_from)
+                new = self.modify_entry(new_entry[i], link_cost, receive_from)
                 update.append(new)
 
             elif (new_entry[i]['dest'] in dests):
-                self.timeout_check(new_entry[i]['dest'])
-                self.remove_garbage_collection(new_entry[i]['dest'])
                 if (new_entry[i]['metric'] + link_cost) < update[dests.index(new_entry[i]['dest'])]['metric']:
                     obsolete = update[dests.index(new_entry[i]['dest'])]
                     update.remove(obsolete)
-                    new = self.modify_entry(new_entry[i], self.router, link_cost, receive_from)
+                    new = self.modify_entry(new_entry[i], link_cost, receive_from)
                     update.append(new)
                     
         self.cur_table = update
         self.display_table(self.cur_table)
+        self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
         return update
 
 
-    def modify_entry(self, entry, object, cost, receive_from):
-        entry['input'] = object.inputs[self.router.peer_rtr_id.index(receive_from)]
-        entry['output'] = object.outputs[self.router.peer_rtr_id.index(receive_from)]
+    def modify_entry(self, entry, cost, receive_from):
+        entry['next-hop'] = receive_from
         entry['metric'] += cost 
         return entry
         
@@ -301,7 +299,7 @@ class Demon:
         resp_pkt += rip_entry
         return resp_pkt
 
-    def compose_rip_entry(self, dest_id, metrics):
+    def compose_rip_entry(self, entry):
         """
         #   RIP ENTRY FORMAT
         #+--------------------------------------------------------------+
@@ -317,15 +315,15 @@ class Demon:
         afi = 0 #afi = address family identifier
         must_be_zero = 0
         
-        for i in range(len(dest_id)): #the item in range() will be replaced by lists of list entry contents
+        for i in range(len(entry)): #the item in range() will be replaced by lists of list entry contents
             #first 32 bits of rip entry
             rip_entry += afi.to_bytes(2, 'big')
             rip_entry += must_be_zero.to_bytes(2, 'big')
             # second to fifth of rip entry
-            rip_entry += dest_id[i].to_bytes(4, 'big')
+            rip_entry += entry[i]['dest'].to_bytes(4, 'big')
             rip_entry += must_be_zero.to_bytes(4, 'big')
             rip_entry += must_be_zero.to_bytes(4, 'big')
-            rip_entry += metrics[i].to_bytes(4, 'big')
+            rip_entry += entry[i]['metric'].to_bytes(4, 'big')
         return rip_entry
    
     def send_packet(self):
@@ -344,23 +342,10 @@ class Demon:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sending_socket:
                 for i in range(len(self.router.outputs)):
                     sending_socket.connect(('127.0.0.1', self.router.outputs[i]))
-                    customized_packet = self.split_horizon(self.router.outputs[i]) #customized_packet for each output
-                    sending_socket.sendto(customized_packet, ('127.0.0.1', self.router.outputs[i])) 
+                    
+                    sending_socket.sendto(self.response_pkt, ('127.0.0.1', self.router.outputs[i])) 
                 print(f"sending response packet ...... ")
 
-    def split_horizon(self, port):
-        routingTable = self.cur_table #need to be dictionarys in list
-        output = []
-        dest = []
-        metric = []
-        for i in range(len(routingTable)):
-            if routingTable[i]['output'] != port:
-                output.append(routingTable[i]['output'])
-                dest.append(routingTable[i]['dest'])
-                metric.append(routingTable[i]['metric'])
-
-        customized_packet = self.rip_response_packet(self.compose_rip_entry(dest, metric))
-        return customized_packet
     
     def is_packet_valid(self, packet):
         """"For packet validity check"""
@@ -369,17 +354,15 @@ class Demon:
 
     def unpack_received_packet(self, received_pkt, receive_from):
         #received_from the the peer router id
-        inputs, outputs, metrics, dest_ids = [], [], [], []
+        dest_ids, next_hop, metrics = [], [], []
         
         for i in range((len(received_pkt)-4)// 20):
-            inputs.append(self.router.inputs[self.router.peer_rtr_id.index(receive_from)])
-            outputs.append(self.router.outputs[self.router.peer_rtr_id.index(receive_from)])
+            next_hop.append(receive_from)
             metrics.append(int.from_bytes(received_pkt[(20+20*i):(24+20*i)], "big"))
             dest_ids.append(int.from_bytes(received_pkt[(8+20*i):(12+20*i)], "big"))
+        contents = [dest_ids, next_hop, metrics]
 
-        contents = [dest_ids, inputs, outputs, metrics]
-
-        new_content = self.generate_table_entry(contents, receive_from)
+        new_content = self.generate_table_entry(contents)
         self.update_entry(self.cur_table, new_content, receive_from)
 
     def receive_packet(self):
@@ -389,16 +372,17 @@ class Demon:
                 for i in range(len(self.router.inputs)):
                     if read_socket == self.socket_list[i]:
                         print(f'\nReceived packet from router {self.router.peer_rtr_id[i]}')
-                        #self.timeout_check(self.router.peer_rtr_id[i]) #This line will initiate timeout for the peer routers
+                        self.timeout_check(self.router.peer_rtr_id[i]) #This line will initiate timeout for the peer routers
+                        self.remove_garbage_collection(self.router.peer_rtr_id[i])
                         resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
-                        #print("  Received response_pkt : ") #, resp_pkt.hex())
+
                         if self.is_packet_valid(resp_pkt):
                             self.response_pkt = resp_pkt
                             #for checking what entries I received
                             for j in range((len(self.response_pkt)-4)// 20):
                                 print("----Received entries [destRtr : {0}, next-hop : {1}, metric : {2}]\n".format( int.from_bytes(self.response_pkt[(8+20*j):(12+20*j)], "big"),
-                                self.router.outputs[i], int.from_bytes(self.response_pkt[(20+20*j):(24+20*i)], "big")))
-                                receive_from = int.from_bytes(self.response_pkt[2:4], "big")
+                                int.from_bytes(self.response_pkt[2:4], "big"), int.from_bytes(self.response_pkt[(20+20*j):(24+20*j)], "big")))
+                                receive_from = self.router.peer_rtr_id[i]
                                 self.unpack_received_packet(self.response_pkt, receive_from)
                         
                             
