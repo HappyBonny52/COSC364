@@ -153,13 +153,9 @@ class Demon:
         self.timeouts = {}
         self.garbage_collects = {}        
         if timers:
-            self.timers = {'periodic':int(timers[0]),
-                           'timeout':int(timers[1]),
-                           'garbage-collection':int(timers[2])}   
+            self.timers = {'periodic':int(timers[0]),'timeout':int(timers[1]), 'garbage-collection':int(timers[2])}   
         else:
-            self.timers = {'periodic':6,
-                           'timeout':36,
-                           'garbage-collection':24}
+            self.timers = {'periodic':6, 'timeout':36, 'garbage-collection':24}
         self.router = Router
         self.is_poisoned = False
         self.cur_table = [{ 'dest' : self.router.rtr_id, 
@@ -238,9 +234,7 @@ class Demon:
         content = []
         dest, next_hop, metrics = entry[0], entry[1], entry[2]
         for i in range(len(entry[0])):
-            content.append({'dest' : dest[i], 
-                            'next-hop' : next_hop[i], 
-                            'metric' : metrics[i]})
+            content.append({'dest' : dest[i], 'next-hop' : next_hop[i], 'metric' : metrics[i]})
         return content
 
 
@@ -248,7 +242,7 @@ class Demon:
         update = current_table
         link_cost = self.router.metrics[self.router.peer_rtr_id.index(receive_from)]
         dests = [update[i]['dest'] for i in range(len(update))]
-
+        better_path = False
             
         for i in range(len(new_entry)):
             if (new_entry[i]['dest'] not in dests) and (new_entry[i]['dest'] != self.router.rtr_id):
@@ -257,14 +251,19 @@ class Demon:
 
             elif (new_entry[i]['dest'] in dests):
                 if (new_entry[i]['metric'] + link_cost) < update[dests.index(new_entry[i]['dest'])]['metric']:
+                    better_path = True
+                    print(f"Better path has been found on reaching router {new_entry[i]['dest']}!")
                     obsolete = update[dests.index(new_entry[i]['dest'])]
                     update.remove(obsolete)
                     new = self.modify_entry(new_entry[i], link_cost, receive_from)
                     update.append(new)
                     
         self.cur_table = update
-        self.display_table(self.cur_table)
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
+        if better_path :
+            print("Send packets due to the route change")
+            self.send_packet()
+        self.display_table(self.cur_table)
         return update
 
 
@@ -328,21 +327,18 @@ class Demon:
    
     def send_packet(self):
         #randomized periodic update for sending packet
-        """
-        i used this for debugging timers -david
         
+        #i used this for debugging timers -david
+        """"
         self.display_table(self.cur_table)
         print(threading.enumerate())
         print(self.timeouts)
-        print(self.garbage_collects)
-        """
-        
+        print(self.garbage_collects)"""
         period = self.timers['periodic'] + rand.randint(-5,5)
         Timer(period, self.send_packet).start()
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sending_socket:
                 for i in range(len(self.router.outputs)):
                     sending_socket.connect(('127.0.0.1', self.router.outputs[i]))
-                    
                     sending_socket.sendto(self.response_pkt, ('127.0.0.1', self.router.outputs[i])) 
                 print(f"sending response packet ...... ")
 
@@ -390,8 +386,8 @@ class Demon:
     def packet_exchange(self):
         try:
             while True:
-                
                 self.send_packet()
+
                 self.receive_packet()
                 
                 raise KeyboardInterrupt
