@@ -165,9 +165,6 @@ class Demon:
         self.socket_list = self.create_socket()
         self.response_pkt = None
         self.packet_exchange()
-
-
-
     
     def remove_entry(self, dst_id):
         """Simply removes the first entry with matching dst_id field"""
@@ -183,6 +180,7 @@ class Demon:
         """Used for removing the Timer thread object that will eventually call remove_entry(dst_id) for a given dst_id"""
         if self.garbage_collects.get(dst_id, None):
             self.garbage_collects[dst_id].cancel()
+            del self.garbage_collects[dst_id]
             
     
     def garbage_collection(self, dst_id):
@@ -205,6 +203,7 @@ class Demon:
         """        
         if self.timeouts.get(dst_id, None):
             self.timeouts[dst_id].cancel()
+            del self.timeouts[dst_id]
         self.timeouts[dst_id] = Timer(self.timers['timeout'], lambda: self.garbage_collection(dst_id))
         self.timeouts[dst_id].start()
             
@@ -390,6 +389,7 @@ class Demon:
                 for i in range(len(self.router.inputs)):
                     if read_socket == self.socket_list[i]:
                         print(f'\nReceived packet from router {self.router.peer_rtr_id[i]}')
+                        #self.timeout_check(self.router.peer_rtr_id[i]) #This line will initiate timeout for the peer routers
                         resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
                         #print("  Received response_pkt : ") #, resp_pkt.hex())
                         if self.is_packet_valid(resp_pkt):
