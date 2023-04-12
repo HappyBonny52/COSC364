@@ -6,6 +6,7 @@ import select
 import socket
 import random as rand
 from threading import Timer
+import threading
 
 RECV_BUFFSIZE = 1024 
 
@@ -148,6 +149,8 @@ class Demon:
         """Initialize Demon with input ports for creating UDP sockets 
         <socket_list> : list of binded sockets indexed in its corresponding input port
         """
+        self.timeouts = {}
+        self.garbage_collects = {}        
         if timers:
             self.timers = {'periodic':int(timers[0]),
                            'timeout':int(timers[1]),
@@ -162,22 +165,50 @@ class Demon:
         self.socket_list = self.create_socket()
         self.response_pkt = None
         self.packet_exchange()
-        self.timeouts = {}
-        self.garbage_collects = {}
 
-    def timeout(self, dst_id):
+
+
+    
+    def remove_entry(self, dst_id):
+        """Simply removes the first entry with matching dst_id field"""
+        del self.garbage_collects[dst_id]
+        for i in range(len(self.cur_table)):
+            if self.cur_table[i]['dest'] == dst_id:
+                del self.cur_table[i]
+                break
+        print("Removed entry for destRtrId: ", dst_id)
+        self.display_table(self.cur_table)
+    
+    def remove_garbage_collection(self, dst_id):
+        """Used for removing the Timer thread object that will eventually call remove_entry(dst_id) for a given dst_id"""
         if self.garbage_collects.get(dst_id, None):
-            self.garbage_collects[dst_id].cancel()        
-
-    def timeout_check(self, dst_id):
-        if self.timeouts.get(dst_id, None):
-            self.timeouts[dst_id].cancel()
-        self.timeouts[dst_id] = Timer(self.timers['timeout'], lambda: timeout(dst_id))
-        self.timeouts[dst_id].start()
+            self.garbage_collects[dst_id].cancel()
+            
+    
+    def garbage_collection(self, dst_id):
+        """Used for adding a Timer thread object that will eventually call remove_entry(dst_id) for a given dst_id"""
+        del self.timeouts[dst_id]
+        if not self.garbage_collects.get(dst_id, None):
+            for i in range(len(self.cur_table)):
+                if self.cur_table[i]['dest'] == dst_id:
+                    self.cur_table[i]['metric'] = 16
+            self.garbage_collects[dst_id] = Timer(self.timers['garbage-collection'], lambda: self.remove_entry(dst_id))
+            self.garbage_collects[dst_id].start()
             
 
-        
-
+    def timeout_check(self, dst_id):
+        """
+        For a given dst_id, it either adds a new Timer thread object that will eventually call garbage_collection(dst_id)
+        OR
+        'Refreshes' the timer for given dst_id in self.timeouts dictionary by creating a new Timer thread object
+        it should be fine on memory because of python garbage collection as long as the old Timer thread object isn't referenced anywhere else**********
+        """        
+        if self.timeouts.get(dst_id, None):
+            self.timeouts[dst_id].cancel()
+        self.timeouts[dst_id] = Timer(self.timers['timeout'], lambda: self.garbage_collection(dst_id))
+        self.timeouts[dst_id].start()
+            
+            
     def create_socket(self):
         """Creating UDP sockets and to bind one with each of input_port"""
         input_port_addr = [('', int(input_port)) for input_port in self.router.inputs]
@@ -218,18 +249,21 @@ class Demon:
         link_cost = self.router.metrics[self.router.peer_rtr_id.index(receive_from)]
         update = current_table
         dests = [update[i]['dest'] for i in range(len(update))]
-
         for i in range(len(new_entry)):
             if (new_entry[i]['dest'] not in dests) and (new_entry[i]['dest'] != self.router.rtr_id):
+                self.timeout_check(new_entry[i]['dest'])
+                self.remove_garbage_collection(new_entry[i]['dest'])
                 new = self.modify_entry(new_entry[i], self.router, link_cost, receive_from)
                 update.append(new)
 
             elif (new_entry[i]['dest'] in dests):
-                    if (new_entry[i]['metric'] + link_cost) < update[dests.index(new_entry[i]['dest'])]['metric']:
-                        obsolete = update[dests.index(new_entry[i]['dest'])]
-                        update.remove(obsolete)
-                        new = self.modify_entry(new_entry[i], self.router, link_cost, receive_from)
-                        update.append(new)
+                self.timeout_check(new_entry[i]['dest'])
+                self.remove_garbage_collection(new_entry[i]['dest'])
+                if (new_entry[i]['metric'] + link_cost) < update[dests.index(new_entry[i]['dest'])]['metric']:
+                    obsolete = update[dests.index(new_entry[i]['dest'])]
+                    update.remove(obsolete)
+                    new = self.modify_entry(new_entry[i], self.router, link_cost, receive_from)
+                    update.append(new)
                     
         self.cur_table = update
         self.display_table(self.cur_table)
@@ -297,6 +331,15 @@ class Demon:
    
     def send_packet(self):
         #randomized periodic update for sending packet
+        """
+        i used this for debugging timers -david
+        
+        self.display_table(self.cur_table)
+        print(threading.enumerate())
+        print(self.timeouts)
+        print(self.garbage_collects)
+        """
+        
         period = self.timers['periodic'] + rand.randint(-5,5)
         Timer(period, self.send_packet).start()
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sending_socket:
@@ -356,7 +399,8 @@ class Demon:
                                 print("----Received entries [destRtr : {0}, next-hop : {1}, metric : {2}]\n".format( int.from_bytes(self.response_pkt[(8+20*j):(12+20*j)], "big"),
                                 self.router.outputs[i], int.from_bytes(self.response_pkt[(20+20*j):(24+20*i)], "big")))
                                 receive_from = int.from_bytes(self.response_pkt[2:4], "big")
-                                self.unpack_received_packet(self.response_pkt, receive_from) 
+                                self.unpack_received_packet(self.response_pkt, receive_from)
+                        
                             
 
     def packet_exchange(self):
@@ -389,8 +433,6 @@ if __name__ == "__main__":
     print(config)
     
     router = Router(int(config.params['router-id'][0]), config.params['input-ports'], config.params['outputs'])
-    if config.params['timers']:
-        rip_routing = Demon(router, config.params['timers'])
-    else:
-        rip_routing = Demon(router)    
+    rip_routing = Demon(router, config.params['timers'])
+   
     main()
