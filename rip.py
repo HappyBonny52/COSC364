@@ -247,13 +247,15 @@ class Demon:
 
         for i in range(len(new_entry)):
             if (new_entry[i]['dest'] not in dests) and (new_entry[i]['dest'] != self.router.rtr_id):
+                self.timeout_check(new_entry[i]['dest'])
+                self.remove_garbage_collection(new_entry[i]['dest'])
                 new = self.modify_entry(new_entry[i], link_cost, receive_from)
                 update.append(new)
 
             elif (new_entry[i]['dest'] in dests):
+                self.timeout_check(new_entry[i]['dest'])
+                self.remove_garbage_collection(new_entry[i]['dest'])
                 if (new_entry[i]['metric'] + link_cost) < update[dests.index(new_entry[i]['dest'])]['metric']:
-                    better_path = True
-                    print(f"Better path has been found on reaching router {new_entry[i]['dest']}!")
                     obsolete = update[dests.index(new_entry[i]['dest'])]
                     update.remove(obsolete)
                     new = self.modify_entry(new_entry[i], link_cost, receive_from)
@@ -400,8 +402,7 @@ class Demon:
                     receive_from = self.router.peer_rtr_id[i]
                     if read_socket == self.socket_list[i]:
                         print(f'\nReceived packet from router {self.router.peer_rtr_id[i]}')
-                        self.timeout_check(receive_from) #This line will initiate timeout for the peer routers
-                        self.remove_garbage_collection(receive_from)
+                        self.timeout_check(self.router.peer_rtr_id[i]) #This line will initiate timeout for the peer routers
                         resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
                         checked_packet = self.is_packet_valid(resp_pkt)
                         if  checked_packet == False:
