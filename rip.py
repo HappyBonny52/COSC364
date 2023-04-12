@@ -261,7 +261,7 @@ class Demon:
         self.cur_table = update
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
         if better_path :
-            print("Send packets due to the route change")
+            print("Triggered update : Send packets due to the route change")
             self.send_packet()
         self.display_table(self.cur_table)
         return update
@@ -327,20 +327,18 @@ class Demon:
    
     def send_packet(self):
         #randomized periodic update for sending packet
-        
         #i used this for debugging timers -david
         """"
         self.display_table(self.cur_table)
         print(threading.enumerate())
         print(self.timeouts)
         print(self.garbage_collects)"""
-        period = self.timers['periodic'] + rand.randint(-5,5)
-        Timer(period, self.send_packet).start()
+
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sending_socket:
                 for i in range(len(self.router.outputs)):
                     sending_socket.connect(('127.0.0.1', self.router.outputs[i]))
                     sending_socket.sendto(self.response_pkt, ('127.0.0.1', self.router.outputs[i])) 
-                print(f"sending response packet ...... ")
+                
 
     
     def is_packet_valid(self, packet):
@@ -359,6 +357,7 @@ class Demon:
         contents = [dest_ids, next_hop, metrics]
 
         new_content = self.generate_table_entry(contents)
+        print(f"----Received entries----\n{new_content}\n")
         self.update_entry(self.cur_table, new_content, receive_from)
 
     def receive_packet(self):
@@ -376,20 +375,21 @@ class Demon:
                             self.response_pkt = resp_pkt
                             #for checking what entries I received
                             for j in range((len(self.response_pkt)-4)// 20):
-                                print("----Received entries [destRtr : {0}, next-hop : {1}, metric : {2}]\n".format( int.from_bytes(self.response_pkt[(8+20*j):(12+20*j)], "big"),
-                                int.from_bytes(self.response_pkt[2:4], "big"), int.from_bytes(self.response_pkt[(20+20*j):(24+20*j)], "big")))
                                 receive_from = self.router.peer_rtr_id[i]
                                 self.unpack_received_packet(self.response_pkt, receive_from)
                         
-                            
+    def periodic_update(self):
+        period = self.timers['periodic'] + rand.randint(-5,5)
+        threading.Timer(period, self.periodic_update).start()
+        print(f"Periodic Update : Sending packet ...... ")
+        self.send_packet()
+                       
 
     def packet_exchange(self):
         try:
             while True:
-                self.send_packet()
-
+                self.periodic_update()
                 self.receive_packet()
-                
                 raise KeyboardInterrupt
 
         except KeyboardInterrupt:
