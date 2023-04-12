@@ -162,10 +162,20 @@ class Demon:
         self.socket_list = self.create_socket()
         self.response_pkt = None
         self.packet_exchange()
+        self.timeouts = {}
+        self.garbage_collects = {}
 
+    def timeout(self, dst_id):
+        if self.garbage_collects.get(dst_id, None):
+            self.garbage_collects[dst_id].cancel()        
 
-    def timeout(self):
-        Timer(self.timers['timeout'], collect_garbage).start()
+    def timeout_check(self, dst_id):
+        if self.timeouts.get(dst_id, None):
+            self.timeouts[dst_id].cancel()
+        self.timeouts[dst_id] = Timer(self.timers['timeout'], lambda: timeout(dst_id))
+        self.timeouts[dst_id].start()
+            
+
         
 
     def create_socket(self):
@@ -368,21 +378,19 @@ class Demon:
                         
        
 
-def main():
+
+    
+
+
+
+if __name__ == "__main__":
     config = Config(sys.argv[1])
     config.unpack()
     print(config)
     
     router = Router(int(config.params['router-id'][0]), config.params['input-ports'], config.params['outputs'])
     if config.params['timers']:
-        print("Timer present")
         rip_routing = Demon(router, config.params['timers'])
     else:
-        print("Timer absent")
-        rip_routing = Demon(router)
-    
-
-
-
-if __name__ == "__main__":
+        rip_routing = Demon(router)    
     main()
