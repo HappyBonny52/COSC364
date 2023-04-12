@@ -157,7 +157,7 @@ class Demon:
         else:
             self.timers = {'periodic':6, 'timeout':36, 'garbage-collection':24}
         self.router = Router
-        self.is_poisoned = False
+        self.posion_reverse_collects = []
         self.cur_table = [{ 'dest' : self.router.rtr_id, 
                             'next-hop' : self.router.rtr_id, 
                             'metric' : 0}]
@@ -165,7 +165,8 @@ class Demon:
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
         self.display_table(self.cur_table)
         self.packet_exchange()
-    
+
+        
     def remove_entry(self, dst_id):
         """Simply removes the first entry with matching dst_id field"""
         del self.garbage_collects[dst_id]
@@ -178,7 +179,7 @@ class Demon:
     
     def remove_garbage_collection(self, dst_id):
         """Used for removing the Timer thread object that will eventually call remove_entry(dst_id) for a given dst_id"""
-        if self.garbage_collects.get(dst_id, None):
+        if self.garbage_collects.get(dst_id, None) :
             self.garbage_collects[dst_id].cancel()
             del self.garbage_collects[dst_id]
             
@@ -243,7 +244,7 @@ class Demon:
         link_cost = self.router.metrics[self.router.peer_rtr_id.index(receive_from)]
         dests = [update[i]['dest'] for i in range(len(update))]
         better_path = False
-            
+
         for i in range(len(new_entry)):
             if (new_entry[i]['dest'] not in dests) and (new_entry[i]['dest'] != self.router.rtr_id):
                 new = self.modify_entry(new_entry[i], link_cost, receive_from)
@@ -328,7 +329,7 @@ class Demon:
     def send_packet(self):
         #randomized periodic update for sending packet
         #i used this for debugging timers -david
-        """"
+        """
         self.display_table(self.cur_table)
         print(threading.enumerate())
         print(self.timeouts)
@@ -342,41 +343,74 @@ class Demon:
 
     
     def is_packet_valid(self, packet):
-        """"For packet validity check"""
-        #Temp
-        return True
+        #===========================================================================#
+        #__________________Codes here need to be cleaned____________________________#
+        #____________Coded Roughly in order to implement poison reverse_____________#
+        #___________________________________________________________________________#
+        #===========================================================================#
+        dest_ids, next_hops, metrics = [], [], []
+        command = int.from_bytes(packet[0:1], "big") #command should be 2
+        version = int.from_bytes(packet[1:2], "big") #version should be 2
+        rtr_id_as_ip_addr = int.from_bytes(packet[2:4], "big") 
+        flag = True
+        if command != 2:
+            flag = False
+            print("Packet Invalid : Wrong value of command")
+        if  version != 2:
+            flag = False
+            print("Packet Invalid : Wrong value of version")
+        if not (1 <= rtr_id_as_ip_addr <= 64000) : #This should be in range of 1024 <= x <= 64000
+            flag = False
+            print("Packet Invalid : Wrong value of router")
 
-    def unpack_received_packet(self, received_pkt, receive_from):
-        #received_from the the peer router id
-        dest_ids, next_hop, metrics = [], [], []
-        
-        for i in range((len(received_pkt)-4)// 20):
-            next_hop.append(receive_from)
-            metrics.append(int.from_bytes(received_pkt[(20+20*i):(24+20*i)], "big"))
-            dest_ids.append(int.from_bytes(received_pkt[(8+20*i):(12+20*i)], "big"))
-        contents = [dest_ids, next_hop, metrics]
+        for i in range((len(packet)-4)// 20):
+            afi = (int.from_bytes(packet[4+20*i:6+20*i], "big"))
+            must_be_zeros = ( int.from_bytes(packet[6+20*i:8+20*i], "big") +  int.from_bytes(packet[12+20*i:20+20*i], "big") ) 
+            dest_id = int.from_bytes(packet[(8+20*i):(12+20*i)], "big")
+            metric= int.from_bytes(packet[(20+20*i):(24+20*i)], "big")
+            if afi != 0:
+                flag = False
+                print("Packet Invalid : Wrong value of address family identifier")
+            if must_be_zeros != 0:
+                flag = False
+                print("Packet Invalid : Wrong value of must_be_zero field")
+            if not (1 <= dest_id <= 64000):
+                flag = False
+                print("Packet Invalid : Wrong value of destination router id")
+            if not (0 <= metric <= 15):
+                if metric > 15:
+                    self.posion_reverse_collects.append(rtr_id_as_ip_addr)
+                else :
+                    flag = False
+                    print("Packet Invalid : Wrong value of metric")
 
-        new_content = self.generate_table_entry(contents)
-        print(f"----Received entries----\n{new_content}\n")
-        self.update_entry(self.cur_table, new_content, receive_from)
+
+            dest_ids.append(dest_id)
+            next_hops.append(rtr_id_as_ip_addr)
+            metrics.append(metric)
+
+        return [dest_ids, next_hops, metrics] if flag == True else False
+
 
     def receive_packet(self):
         while True:
             read_socket_lis, _, _ = select.select(self.socket_list, [], [])
             for read_socket in read_socket_lis:
                 for i in range(len(self.router.inputs)):
+                    receive_from = self.router.peer_rtr_id[i]
                     if read_socket == self.socket_list[i]:
                         print(f'\nReceived packet from router {self.router.peer_rtr_id[i]}')
-                        self.timeout_check(self.router.peer_rtr_id[i]) #This line will initiate timeout for the peer routers
-                        self.remove_garbage_collection(self.router.peer_rtr_id[i])
+                        self.timeout_check(receive_from) #This line will initiate timeout for the peer routers
+                        self.remove_garbage_collection(receive_from)
                         resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
-
-                        if self.is_packet_valid(resp_pkt):
+                        checked_packet = self.is_packet_valid(resp_pkt)
+                        if  checked_packet == False:
+                            print(f"Received packet from router {receive_from} failed validity check!\nDrop this packet....")
+                        else:
                             self.response_pkt = resp_pkt
-                            #for checking what entries I received
-                            for j in range((len(self.response_pkt)-4)// 20):
-                                receive_from = self.router.peer_rtr_id[i]
-                                self.unpack_received_packet(self.response_pkt, receive_from)
+                            new_content = self.generate_table_entry(checked_packet)
+                            print(f"----Received entries----\n{checked_packet}")
+                            self.update_entry(self.cur_table, new_content, receive_from)
                         
     def periodic_update(self):
         period = self.timers['periodic'] + rand.randint(-5,5)
