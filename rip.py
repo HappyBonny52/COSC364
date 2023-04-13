@@ -343,8 +343,22 @@ class Demon:
 
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sending_socket:
                 for i in range(len(self.router.outputs)):
-                    sending_socket.connect(('127.0.0.1', self.router.outputs[i]))
-                    sending_socket.sendto(self.response_pkt, ('127.0.0.1', self.router.outputs[i])) 
+                    customized_packet = self.split_horizon(self.cur_table, self.router.outputs[i]) #customized_packet for each output
+                    sending_socket.sendto(customized_packet, ('127.0.0.1', self.router.outputs[i])) 
+
+    def split_horizon(self, table, port):
+        """
+        Implement split_horizon by filtering entries and generate customied packet for each peer router.
+        Customization : Remove entries that indicate connected peer router(who will be received packet)
+        is known as the next hop router with the minimum cost to reach a certain destination router
+        in current routing table.
+        In short, check if the router receiving this packet already knows about this information
+        if it does[it means entries are redundant for peer router], then filter this information 
+        and send the other information in routing table
+        """
+        peer_rtr = self.router.peer_rtr_id[self.router.outputs.index(port)] 
+        filterd = [table[i] for i in range(len(table)) if ((table[i]['next-hop'] and table[i]['dest']) != peer_rtr)]
+        return self.rip_response_packet(self.compose_rip_entry(filterd))
                 
 
     
