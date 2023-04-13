@@ -164,6 +164,7 @@ class Demon:
         self.socket_list = self.create_socket()
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
         self.display_table(self.cur_table)
+        self.periodic_update()
         self.packet_exchange()
 
         
@@ -223,7 +224,7 @@ class Demon:
         display = f"\nRouting table of router {self.router.rtr_id}\n"
         display += '+-------------------------------------------------------------------+\n'
         for i in range(len(contents)):
-            space = '  ' if contents[i]['metric'] < 10 else ' '
+            space = '  ' if contents[i]['metric'] < 10 else ' ' #For drawing tidy table
             display += "|   Destination : router {0}  |  Next-hop : router {1}  |  Metric : {2} {3}|\n".format(contents[i]['dest'],
                                                                                                          contents[i]['next-hop'],
                                                                                                          contents[i]['metric'],
@@ -414,8 +415,10 @@ class Demon:
                             self.update_entry(self.cur_table, new_content, receive_from)
                         
     def periodic_update(self):
-        period = rand.randint(0.8*self.timers['periodic'],1.2*self.timers['periodic'])
+
+        period = round(random.uniform(0.8*self.timers['periodic'],1.2*self.timers['periodic']), 2) #Generates random float between [0.8*periodic time, 1.2*periodic time] and rounds to 2dp
         threading.Timer(period, self.periodic_update).start()
+
         print(f"Periodic Update : Sending packet ...... ")
         self.send_packet()
                        
@@ -423,7 +426,6 @@ class Demon:
     def packet_exchange(self):
         try:
             while True:
-                self.periodic_update()
                 self.receive_packet()
                 raise KeyboardInterrupt
 
@@ -433,15 +435,6 @@ class Demon:
 
                 
 
-
-                        
-       
-
-
-    
-
-
-
 if __name__ == "__main__":
     config = Config(sys.argv[1])
     config.unpack()
@@ -450,4 +443,3 @@ if __name__ == "__main__":
     router = Router(int(config.params['router-id'][0]), config.params['input-ports'], config.params['outputs'])
     rip_routing = Demon(router, config.params['timers'])
    
-    main()
