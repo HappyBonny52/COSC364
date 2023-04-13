@@ -416,7 +416,7 @@ class Demon:
                         else:
                             self.response_pkt = resp_pkt
                             new_content = self.generate_table_entry(checked_packet)
-                            print(f"----Received entries----\n{checked_packet}")
+                            print(f"----Received entries----\n{new_content}")
                             self.update_entry(self.cur_table, new_content, receive_from)
                         
     def periodic_update(self):
@@ -438,7 +438,6 @@ class Demon:
             print('Keyboard Interrupted!')
         sys.exit(1)
 
-                
 
 if __name__ == "__main__":
     config = Config(sys.argv[1])
