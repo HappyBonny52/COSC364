@@ -364,9 +364,9 @@ class Demon:
             if table[i]['metric'] > 15: #posion_reverse
                 filtered.append(table[i]) #not filtering entry as it has to be send to peer router 
             else:
-                ((table[i]['next-hop'] and table[i]['dest']) != peer_rtr):
-                filtered.append(table[i])
-        return self.rip_response_packet(self.compose_rip_entry(filterd))
+                if ((table[i]['next-hop'] and table[i]['dest']) != peer_rtr):#split_horizon
+                    filtered.append(table[i]) #filtered entry from if condition is added to the rip entry for packet
+        return self.rip_response_packet(self.compose_rip_entry(filtered))
                 
 
     
