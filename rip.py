@@ -414,7 +414,7 @@ class Demon:
                             self.update_entry(self.cur_table, new_content, receive_from)
                         
     def periodic_update(self):
-        period = self.timers['periodic'] + rand.randint(-5,5)
+        period = rand.randint(0.8*self.timers['periodic'],1.2*self.timers['periodic'])
         threading.Timer(period, self.periodic_update).start()
         print(f"Periodic Update : Sending packet ...... ")
         self.send_packet()
