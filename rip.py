@@ -416,7 +416,7 @@ class Demon:
                         
     def periodic_update(self):
 
-        period = round(random.uniform(0.8*self.timers['periodic'],1.2*self.timers['periodic']), 2) #Generates random float between [0.8*periodic time, 1.2*periodic time] and rounds to 2dp
+        period = round(rand.uniform(0.8*self.timers['periodic'],1.2*self.timers['periodic']), 2) #Generates random float between [0.8*periodic time, 1.2*periodic time] and rounds to 2dp
         threading.Timer(period, self.periodic_update).start()
 
         print(f"Periodic Update : Sending packet ...... ")
