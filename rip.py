@@ -343,10 +343,10 @@ class Demon:
 
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sending_socket:
                 for i in range(len(self.router.outputs)):
-                    customized_packet = self.split_horizon(self.cur_table, self.router.outputs[i]) #customized_packet for each output
+                    customized_packet = self.split_horizon_with_poison_reverse(self.cur_table, self.router.outputs[i]) #customized_packet for each output
                     sending_socket.sendto(customized_packet, ('127.0.0.1', self.router.outputs[i])) 
 
-    def split_horizon(self, table, port):
+    def split_horizon_with_poison_reverse(self, table, port):
         """
         Implement split_horizon by filtering entries and generate customied packet for each peer router.
         Customization : Remove entries that indicate connected peer router(who will be received packet)
@@ -355,9 +355,17 @@ class Demon:
         In short, check if the router receiving this packet already knows about this information
         if it does[it means entries are redundant for peer router], then filter this information 
         and send the other information in routing table
+        For poison_reverse, split-horizon-filter process will not be conducted for entry with metric more than 15
+        and apply split horizon to the other entries
         """
         peer_rtr = self.router.peer_rtr_id[self.router.outputs.index(port)] 
-        filterd = [table[i] for i in range(len(table)) if ((table[i]['next-hop'] and table[i]['dest']) != peer_rtr)]
+        filtered = []
+        for i in range(len(table)):
+            if table[i]['metric'] > 15: #posion_reverse
+                filtered.append(table[i]) #not filtering entry as it has to be send to peer router 
+            else:
+                ((table[i]['next-hop'] and table[i]['dest']) != peer_rtr):
+                filtered.append(table[i])
         return self.rip_response_packet(self.compose_rip_entry(filterd))
                 
 
