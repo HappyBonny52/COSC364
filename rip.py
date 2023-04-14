@@ -152,7 +152,7 @@ class Demon:
             self.timers = {'periodic':6, 'timeout':36, 'garbage-collection':24}
         
         self.posion_reverse_collects = []
-        self.cur_table = [{ 'dest' : self.router.rtr_id, 'next-hop' : self.router.rtr_id,  'metric' : 0}]
+        self.cur_table = self.generate_table_entry([[self.router.rtr_id], [self.router.rtr_id], [0]])
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
   
         self.display_table(self.cur_table)
@@ -208,51 +208,50 @@ class Demon:
         self.timeouts[dst_id].start()
 
     def display_table(self, contents):
+        dest = list(contents)
         display = f"\nRouting table of router {self.router.rtr_id}\n"
         display += '+-----------------------------------------------------------------------+\n'
         display += '|  Destination  |  Next-hop  |  Cost  |  Route Change Flag  |   Timer   |\n'
         display += '+-----------------------------------------------------------------------+\n'
-        for i in range(len(contents)):
-            space = '  ' if contents[i]['metric'] < 10 else ' ' #For drawing tidy table
-            display += "|    router {0}   |  router {1}  |   {2}{3}  |                     |           |\n".format(contents[i]['dest'],
-                                                                                                         contents[i]['next-hop'],
-                                                                                                         contents[i]['metric'],
+        for entry in contents:
+            space = '  ' if contents[entry]['metric'] < 10 else ' ' #For drawing tidy table
+            display += "|    router {0}   |  router {1}  |   {2}{3}  |                     |           |\n".format(entry,
+                                                                                                         contents[entry]['next-hop'],
+                                                                                                         contents[entry]['metric'],
                                                                                                          space)
         display += '+-----------------------------------------------------------------------+\n'
         print(display)
         
     def generate_table_entry(self, entry):
-        content = []
-        dest, next_hop, metrics = entry[0], entry[1], entry[2]
-        for i in range(len(entry[0])):
-            content.append({'dest' : dest[i], 'next-hop' : next_hop[i], 'metric' : metrics[i]})
+        content = {}
+        dest, next_hop, metric = entry[0], entry[1], entry[2]
+        for i in range(len(dest)):
+            content[dest[i]] = {'next-hop' : next_hop[i], 'metric' : metric[i]}
         return content
 
     def update_entry(self, current_table, new_entry, receive_from):
         update = current_table
         link_cost = self.router.neighbor[receive_from]['cost']
-        dests = [update[i]['dest'] for i in range(len(update))]
+        known_dst = list(current_table)
         better_path = False
 
-        for i in range(len(new_entry)):
-            if (new_entry[i]['dest'] not in dests) and (new_entry[i]['dest'] != self.router.rtr_id):
-                print("INSIDE 1ST IF: ", new_entry[i]['dest'])
-                self.timeout_check(new_entry[i]['dest'])
-                self.remove_garbage_collection(new_entry[i]['dest'])
-                new = self.modify_entry(new_entry[i], link_cost, receive_from)
-                update.append(new)
+        for new_dst in new_entry:
+            if (new_dst not in known_dst) and (new_dst != self.router.rtr_id):
+                print("INSIDE 1ST IF: ", new_dst)
+                self.timeout_check(new_dst)
+                self.remove_garbage_collection(new_dst)
+                update[new_dst] = {'next-hop' : receive_from , 'metric' : new_entry[new_dst]['metric'] + link_cost }
 
-            elif (new_entry[i]['dest'] in dests):
-                if new_entry[i]['dest'] != self.router.rtr_id:
-                    print("INSIDE 2ND IF: ", new_entry[i]['dest'])
-                    self.timeout_check(new_entry[i]['dest'])
-                    self.remove_garbage_collection(new_entry[i]['dest'])
-                if (new_entry[i]['metric'] + link_cost) < update[dests.index(new_entry[i]['dest'])]['metric']:
+            elif (new_dst in known_dst):
+                if new_dst != self.router.rtr_id:
+                    print("INSIDE 2ND IF: ", new_dst)
+                    self.timeout_check(new_dst)
+                    self.remove_garbage_collection(new_dst)
+                if (new_entry[new_dst]['metric'] + link_cost) < update[new_dst]['metric']:
                     better_path = True
-                    obsolete = update[dests.index(new_entry[i]['dest'])]
-                    update.remove(obsolete)
-                    new = self.modify_entry(new_entry[i], link_cost, receive_from)
-                    update.append(new)
+                    update[new_dst]['metric'] = new_entry[new_dst]['metric'] + link_cost
+                    update[new_dst]['next-hop'] = receive_from
+                    
                     
         self.cur_table = update
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
@@ -308,16 +307,16 @@ class Demon:
         rip_entry = bytearray()
         afi = 0 #afi = address family identifier
         must_be_zero = 0
-        
+        dest = list(entry)
         for i in range(len(entry)): #the item in range() will be replaced by lists of list entry contents
             #first 32 bits of rip entry
             rip_entry += afi.to_bytes(2, 'big')
             rip_entry += must_be_zero.to_bytes(2, 'big')
             # second to fifth of rip entry
-            rip_entry += entry[i]['dest'].to_bytes(4, 'big')
+            rip_entry += dest[i].to_bytes(4, 'big')
             rip_entry += must_be_zero.to_bytes(4, 'big')
             rip_entry += must_be_zero.to_bytes(4, 'big')
-            rip_entry += entry[i]['metric'].to_bytes(4, 'big')
+            rip_entry += entry[dest[i]]['metric'].to_bytes(4, 'big')
         return rip_entry
    
     def send_packet(self):
@@ -330,7 +329,7 @@ class Demon:
         print(self.garbage_collects)"""
         peer = self.router.neighbor
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sending_socket:
-                for i in range(len(self.router.neighbor.values())):
+                for i in range(len(peer)):
                     port = list(peer.values())[i]['output']
                     peer_rtr = list(peer)[i]
                     customized_pkt = self.split_horizon_with_poison_reverse(self.cur_table, peer_rtr, port) #customized_packet for each output
@@ -348,13 +347,13 @@ class Demon:
         For poison_reverse, split-horizon-filter process will not be conducted for entry with metric more than 15
         and apply split horizon to the other entries
         """
-        filtered = []
-        for i in range(len(table)):
-            if table[i]['metric'] > 15: #posion_reverse
-                filtered.append(table[i]) #not filtering entry as it has to be send to peer router 
+        filtered = {}
+        for dest in table:
+            if table[dest]['metric'] > 15: #posion_reverse
+                filtered[dest] = table[dest] #not filtering entry as it has to be send to peer router 
             else:
-                if ((table[i]['next-hop'] and table[i]['dest']) != peer_rtr):#split_horizon
-                    filtered.append(table[i]) #filtered entry from if condition is added to the rip entry for packet
+                if (table[dest]['next-hop'] and dest) != peer_rtr:#split_horizon
+                    filtered[dest] = table[dest]#filtered entry from if condition is added to the rip entry for packet
         return self.rip_response_packet(self.compose_rip_entry(filtered))
     
     def is_packet_valid(self, packet):
@@ -418,7 +417,6 @@ class Demon:
                             print("INSIDE RECIEVE_PACKET: ", receive_from)
                             self.timeout_check(receive_from) #This line will initiate timeout for the peer routers
                         resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
-                        print(f"This is the port I received : {port}")
                         checked_packet = self.is_packet_valid(resp_pkt)
                         if  checked_packet == False:
                             print(f"Received packet from router {receive_from} failed validity check!\nDrop this packet....")
