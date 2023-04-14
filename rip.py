@@ -39,7 +39,7 @@ class Config:
              router-id: {1}
              input-ports: {2}
              outputs: {3}
-             timers: {4}""".format(self.path, self.params['router-id'],
+             timers: {4}\n""".format(self.path, self.params['router-id'],
                                                        self.params['input-ports'],
                                                        self.params['outputs'],
                                                        self.params['timers'],)
@@ -171,9 +171,9 @@ class Demon:
     def remove_entry(self, dst_id):
         """Simply removes the first entry with matching dst_id field"""
         del self.garbage_collects[dst_id]
-        for i in range(len(self.cur_table)):
-            if self.cur_table[i]['dest'] == dst_id:
-                del self.cur_table[i]
+        for known_dst in self.cur_table:
+            if known_dst == dst_id:
+                self.cur_table.pop(dst_id)
                 break
         print("Removed entry for destRtrId: ", dst_id)
         self.display_table(self.cur_table)
@@ -188,9 +188,9 @@ class Demon:
         """Used for adding a Timer thread object that will eventually call remove_entry(dst_id) for a given dst_id"""
         del self.timeouts[dst_id]
         if not self.garbage_collects.get(dst_id, None):
-            for i in range(len(self.cur_table)):
-                if self.cur_table[i]['dest'] == dst_id:
-                    self.cur_table[i]['metric'] = 16
+            for known_dst in self.cur_table:
+                if known_dst == dst_id:
+                    self.cur_table[known_dst]['metric'] = 16
             self.garbage_collects[dst_id] = Timer(self.timers['garbage-collection'], lambda: self.remove_entry(dst_id))
             self.garbage_collects[dst_id].start()
 
@@ -209,7 +209,7 @@ class Demon:
 
     def display_table(self, contents):
         dest = list(contents)
-        display = f"\nRouting table of router {self.router.rtr_id}\n"
+        display = f"Routing table of router {self.router.rtr_id}\n"
         display += '+-----------------------------------------------------------------------+\n'
         display += '|  Destination  |  Next-hop  |  Cost  |  Route Change Flag  |   Timer   |\n'
         display += '+-----------------------------------------------------------------------+\n'
@@ -231,40 +231,42 @@ class Demon:
 
     def update_entry(self, current_table, new_entry, receive_from):
         update = current_table
+        print(f"----Current_table-------- \n{update}\n")
         link_cost = self.router.neighbor[receive_from]['cost']
         known_dst = list(current_table)
         better_path = False
 
         for new_dst in new_entry:
-            if (new_dst not in known_dst) and (new_dst != self.router.rtr_id):
-                print("INSIDE 1ST IF: ", new_dst)
-                self.timeout_check(new_dst)
-                self.remove_garbage_collection(new_dst)
-                update[new_dst] = {'next-hop' : receive_from , 'metric' : new_entry[new_dst]['metric'] + link_cost }
+            new_metric = new_entry[new_dst]['metric'] + link_cost
+            self.timeout_check(new_dst)
+            self.remove_garbage_collection(new_dst) 
+            if (new_dst not in known_dst):
+                print(f"******NOTICE : NEW ROUTE FOUND : ROUTER {new_dst} IS REACHABLE******" )
+                update = self.add_entry(update, new_dst, receive_from, new_metric)
 
-            elif (new_dst in known_dst):
-                if new_dst != self.router.rtr_id:
-                    print("INSIDE 2ND IF: ", new_dst)
-                    self.timeout_check(new_dst)
-                    self.remove_garbage_collection(new_dst)
-                if (new_entry[new_dst]['metric'] + link_cost) < update[new_dst]['metric']:
+            else : # if new_dst in known_dst
+                if (new_metric < update[new_dst]['metric']):
+                    print(f"******NOTICE : BETTER ROUTE FOUND FOR ROUTER {new_dst} : COST REDUCED FROM {update[new_dst]['metric']} to {new_metric}******" )
                     better_path = True
-                    update[new_dst]['metric'] = new_entry[new_dst]['metric'] + link_cost
-                    update[new_dst]['next-hop'] = receive_from
-                    
-                    
+                    update = self.modify_entry(update, new_dst, receive_from, new_metric)
+                                    
         self.cur_table = update
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
         if better_path :
             print("Triggered update : Send packets due to the route change")
             self.send_packet()
+        print(f"----Updated Table--------")
         self.display_table(self.cur_table)
         return update
 
-    def modify_entry(self, entry, cost, receive_from):
-        entry['next-hop'] = receive_from
-        entry['metric'] += cost 
-        return entry
+    def add_entry(self, table, dst_rtr, next_hop, cost):
+        table[dst_rtr] = {'next-hop' : next_hop , 'metric' : cost}
+        return table
+
+    def modify_entry(self, table, dst_rtr, next_hop, cost):
+        table[dst_rtr]['next-hop'] = next_hop
+        table[dst_rtr]['metric'] = cost 
+        return table
         
     def rip_response_packet(self, rip_entry):
         """
@@ -332,10 +334,10 @@ class Demon:
                 for i in range(len(peer)):
                     port = list(peer.values())[i]['output']
                     peer_rtr = list(peer)[i]
-                    customized_pkt = self.split_horizon_with_poison_reverse(self.cur_table, peer_rtr, port) #customized_packet for each output
+                    customized_pkt = self.split_horizon_with_poison_reverse(peer_rtr, port) #customized_packet for each output
                     sending_socket.sendto(customized_pkt, ('127.0.0.1', port)) 
 
-    def split_horizon_with_poison_reverse(self, table, peer_rtr, port):
+    def split_horizon_with_poison_reverse(self, peer_rtr, port):
         """
         Implement split_horizon by filtering entries and generate customized packet for each peer router.
         Customization : Remove entries that indicate connected peer router(who will be received packet)
@@ -347,6 +349,7 @@ class Demon:
         For poison_reverse, split-horizon-filter process will not be conducted for entry with metric more than 15
         and apply split horizon to the other entries
         """
+        table = self.cur_table
         filtered = {}
         for dest in table:
             if table[dest]['metric'] > 15: #posion_reverse
@@ -356,13 +359,13 @@ class Demon:
                     filtered[dest] = table[dest]#filtered entry from if condition is added to the rip entry for packet
         return self.rip_response_packet(self.compose_rip_entry(filtered))
     
-    def is_packet_valid(self, packet):
+    def is_packet_valid(self, packet, receive_from):
         #===========================================================================#
         #__________________Codes here need to be cleaned____________________________#
         #____________Coded Roughly in order to implement poison reverse_____________#
         #___________________________________________________________________________#
         #===========================================================================#
-        dest_ids, next_hops, metrics = [], [], []
+        entry = {}
         command = int.from_bytes(packet[0:1], "big") #command should be 2
         version = int.from_bytes(packet[1:2], "big") #version should be 2
         rtr_id_as_ip_addr = int.from_bytes(packet[2:4], "big") 
@@ -393,17 +396,14 @@ class Demon:
                 print("Packet Invalid : Wrong value of destination router id")
             if not (0 <= metric <= 15):
                 if metric > 15:
-                    self.posion_reverse_collects.append(rtr_id_as_ip_addr)
+                    self.posion_reverse_collects.append(receive_from)
                 else :
                     flag = False
                     print("Packet Invalid : Wrong value of metric")
 
+            entry[dest_id] = {'next-hop': receive_from, 'metric': metric}
 
-            dest_ids.append(dest_id)
-            next_hops.append(rtr_id_as_ip_addr)
-            metrics.append(metric)
-
-        return [dest_ids, next_hops, metrics] if is_valid else False
+        return entry if is_valid else False
 
     def receive_packet(self):
         while True:
@@ -414,17 +414,16 @@ class Demon:
                     if read_socket == self.socket_list[i]:
                         print(f'\nReceived packet from router {receive_from}')
                         if receive_from != self.router.rtr_id:
-                            print("INSIDE RECIEVE_PACKET: ", receive_from)
                             self.timeout_check(receive_from) #This line will initiate timeout for the peer routers
                         resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
-                        checked_packet = self.is_packet_valid(resp_pkt)
+                        checked_packet = self.is_packet_valid(resp_pkt, receive_from)
                         if  checked_packet == False:
                             print(f"Received packet from router {receive_from} failed validity check!\nDrop this packet....")
                         else:
                             self.response_pkt = resp_pkt
-                            new_content = self.generate_table_entry(checked_packet)
-                            print(f"----Received entries----\n{new_content}")
-                            self.update_entry(self.cur_table, new_content, receive_from)
+                            
+                            print(f"----Received entries-----\n{checked_packet}")
+                            self.update_entry(self.cur_table, checked_packet, receive_from)
                         
     def periodic_update(self):
 
