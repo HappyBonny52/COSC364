@@ -124,26 +124,18 @@ class Router:
     def __init__(self,  rtrId, inputs, outputs):
         
         self.rtr_id = rtrId # of type int
-        self.inputs = [input_port for input_port in inputs] #list
-        self.output = self.decompose_output(outputs) #list
-        self.outputs = self.output[0] #list
-        self.metrics = self.output[1] #list
-        self.peer_rtr_id = self.output[2] #list
-        
+        self.inputs = inputs
+        self.neighbor = self.decompose_output(outputs)
     
     def decompose_output(self, outputs):
         """split output format by '-' and sort by each item into list
         # output format [peer's_input_port - metric(link cost) - peer's router id (peer's_input_port is equal to current router's output_port)]"""
         #split output by '-'
-        split_output = [outputs[i].split('-') for i in range(len(outputs))] 
-
-        ports, metrices, peer_rtr_ids = [], [], []
-        for i in range(len(split_output)):
-            ports.append(int(split_output[i][0]))
-            metrices.append(int(split_output[i][1]))
-            peer_rtr_ids.append(int(split_output[i][2]))
-        
-        return [ports, metrices, peer_rtr_ids]
+        neighbor = {}
+        for output in outputs:
+            neighbor[int(output.split('-')[2])] = {'cost': int(output.split('-')[1]), 
+                                                   'output' : int(output.split('-')[0])}
+        return neighbor
 
 class Demon:
     def __init__(self, Router, timers=None):
@@ -170,9 +162,9 @@ class Demon:
     def create_socket(self):
         """Creating UDP sockets and to bind one with each of input_port"""
         socket_list = []
-        for i in range(len(self.router.inputs[i])):
+        for i in range(len(self.router.inputs)):
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.bind('127.0.0.1', int(self.router.inputs[i])) #bind with local host
+            sock.bind(('127.0.0.1', int(self.router.inputs[i]))) #bind with local host
             socket_list.append(sock)
         return socket_list
         
@@ -238,7 +230,7 @@ class Demon:
 
     def update_entry(self, current_table, new_entry, receive_from):
         update = current_table
-        link_cost = self.router.metrics[self.router.peer_rtr_id.index(receive_from)]
+        link_cost = self.router.neighbor[receive_from]['cost']
         dests = [update[i]['dest'] for i in range(len(update))]
         better_path = False
 
@@ -336,13 +328,15 @@ class Demon:
         print(threading.enumerate())
         print(self.timeouts)
         print(self.garbage_collects)"""
-
+        peer = self.router.neighbor
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sending_socket:
-                for i in range(len(self.router.outputs)):
-                    customized_packet = self.split_horizon_with_poison_reverse(self.cur_table, self.router.outputs[i]) #customized_packet for each output
-                    sending_socket.sendto(customized_packet, ('127.0.0.1', self.router.outputs[i])) 
+                for i in range(len(self.router.neighbor.values())):
+                    port = list(peer.values())[i]['output']
+                    peer_rtr = list(peer)[i]
+                    customized_pkt = self.split_horizon_with_poison_reverse(self.cur_table, peer_rtr, port) #customized_packet for each output
+                    sending_socket.sendto(customized_pkt, ('127.0.0.1', port)) 
 
-    def split_horizon_with_poison_reverse(self, table, port):
+    def split_horizon_with_poison_reverse(self, table, peer_rtr, port):
         """
         Implement split_horizon by filtering entries and generate customized packet for each peer router.
         Customization : Remove entries that indicate connected peer router(who will be received packet)
@@ -354,7 +348,6 @@ class Demon:
         For poison_reverse, split-horizon-filter process will not be conducted for entry with metric more than 15
         and apply split horizon to the other entries
         """
-        peer_rtr = self.router.peer_rtr_id[self.router.outputs.index(port)] 
         filtered = []
         for i in range(len(table)):
             if table[i]['metric'] > 15: #posion_reverse
@@ -418,12 +411,12 @@ class Demon:
             read_socket_lis, _, _ = select.select(self.socket_list, [], [])
             for read_socket in read_socket_lis:
                 for i in range(len(self.router.inputs)):
-                    receive_from = self.router.peer_rtr_id[i]
+                    receive_from = list(self.router.neighbor)[i]
                     if read_socket == self.socket_list[i]:
-                        print(f'\nReceived packet from router {self.router.peer_rtr_id[i]}')
-                        if self.router.peer_rtr_id[i] != self.router.rtr_id:
-                            print("INSIDE RECIEVE_PACKET: ", self.router.peer_rtr_id[i])
-                            self.timeout_check(self.router.peer_rtr_id[i]) #This line will initiate timeout for the peer routers
+                        print(f'\nReceived packet from router {receive_from}')
+                        if receive_from != self.router.rtr_id:
+                            print("INSIDE RECIEVE_PACKET: ", receive_from)
+                            self.timeout_check(receive_from) #This line will initiate timeout for the peer routers
                         resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
                         print(f"This is the port I received : {port}")
                         checked_packet = self.is_packet_valid(resp_pkt)
