@@ -5,7 +5,7 @@ import sys
 import select
 import socket
 import random as rand
-from threading import Timer
+from threading import Timer, Lock
 import threading
 
 
@@ -143,13 +143,16 @@ class Demon:
         <socket_list> : list of binded sockets indexed in its corresponding input port
         """
         self.router = Router
-        self.socket_list = self.create_socket()
+        
         self.timeouts = {}
         self.garbage_collects = {}        
         if timers:
             self.timers = {'periodic':int(timers[0]),'timeout':int(timers[1]), 'garbage-collection':int(timers[2])}   
         else:
             self.timers = {'periodic':6, 'timeout':36, 'garbage-collection':24}
+            
+        self.socket_list = self.create_socket()
+
         
         self.posion_reverse_collects = []
         self.cur_table = self.generate_table_entry([[self.router.rtr_id], [self.router.rtr_id], [0]])
@@ -164,20 +167,26 @@ class Demon:
         socket_list = []
         for i in range(len(self.router.inputs)):
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.bind(('127.0.0.1', int(self.router.inputs[i]))) #bind with local host
+            sock.bind(('127.0.0.1', int(self.router.inputs[i]))) #bind with local host         
             socket_list.append(sock)
         return socket_list
         
     def remove_entry(self, dst_id):
         """Simply removes the first entry with matching dst_id field"""
-        del self.garbage_collects[dst_id]
-        for known_dst in self.cur_table:
-            if known_dst == dst_id:
-                self.cur_table.pop(dst_id)
-                break
+        if self.garbage_collects.get(dst_id, None):
+            del self.garbage_collects[dst_id]
+            
+        if self.cur_table.get(dst_id, None):
+            self.cur_table.pop(dst_id)
+            self.send_packet()
+            
+            
+        print_lock = threading.Lock()
+        print_lock.acquire()
         print("Removed entry for destRtrId: ", dst_id)
         self.display_table(self.cur_table)
-    
+        print_lock.release()
+        
     def remove_garbage_collection(self, dst_id):
         """Used for removing the Timer thread object that will eventually call remove_entry(dst_id) for a given dst_id"""
         if self.garbage_collects.get(dst_id, None) :
@@ -186,11 +195,12 @@ class Demon:
     
     def garbage_collection(self, dst_id):
         """Used for adding a Timer thread object that will eventually call remove_entry(dst_id) for a given dst_id"""
-        del self.timeouts[dst_id]
+        if self.timeouts.get(dst_id, None):
+            del self.timeouts[dst_id]
+        
         if not self.garbage_collects.get(dst_id, None):
-            for known_dst in self.cur_table:
-                if known_dst == dst_id:
-                    self.cur_table[known_dst]['metric'] = 16
+            self.cur_table[dst_id]['metric'] = 16
+            self.send_packet()
             self.garbage_collects[dst_id] = Timer(self.timers['garbage-collection'], lambda: self.remove_entry(dst_id))
             self.garbage_collects[dst_id].start()
 
@@ -238,8 +248,9 @@ class Demon:
 
         for new_dst in new_entry:
             new_metric = new_entry[new_dst]['metric'] + link_cost
-            self.timeout_check(new_dst)
-            self.remove_garbage_collection(new_dst) 
+            if new_dst in self.router.neighbor:
+                self.timeout_check(new_dst)
+                self.remove_garbage_collection(new_dst) 
             if (new_dst not in known_dst):
                 print(f"******NOTICE : NEW ROUTE FOUND : ROUTER {new_dst} IS REACHABLE******" )
                 update = self.add_entry(update, new_dst, receive_from, new_metric)
@@ -413,8 +424,8 @@ class Demon:
                     receive_from = list(self.router.neighbor)[i]
                     if read_socket == self.socket_list[i]:
                         print(f'\nReceived packet from router {receive_from}')
-                        if receive_from != self.router.rtr_id:
-                            self.timeout_check(receive_from) #This line will initiate timeout for the peer routers
+                        #if receive_from != self.router.rtr_id:
+                        #    self.timeout_check(receive_from) #This line will initiate timeout for the peer routers
                         resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
                         checked_packet = self.is_packet_valid(resp_pkt, receive_from)
                         if  checked_packet == False:
