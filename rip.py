@@ -176,16 +176,26 @@ class Demon:
         if self.garbage_collects.get(dst_id, None):
             del self.garbage_collects[dst_id]
             
-        if self.cur_table.get(dst_id, None) and dst_id != self.router.rtr_id:
+        if self.cur_table.get(dst_id, None) and dst_id != self.router.rtr_id:###########remove 1
+            print("Passing def remove_entry 1")
             print("poison reverse added for router ", dst_id)
             self.poison_collect.append(dst_id)##################
-            self.cur_table[dst_id]['metric'] = 16######################
+            print("Poison collect list = ", self.poison_collect)
+            self.cur_table[dst_id]['metric'] = 16###################### remove 2
             print("Send new route with metric 16 of router", dst_id)
             self.send_packet()###############################
             ##########################################
             for dst in self.cur_table.copy():
                 if self.cur_table[dst]['next-hop'] == dst_id:
+                    print("Passing def remove_entry 2")
+                    print("poison reverse added for router ", dst)
+                    self.poison_collect.append(dst)##################
+                    print("Poison collect list = ", self.poison_collect)
+                    self.cur_table[dst]['metric'] = 16######################
+                    print("Send new route with metric 16 AS IT IS NEXT HOP router", dst)
                     self.cur_table.pop(dst)
+                    self.send_packet()###############################
+                    print("Poison collect list = ", self.poison_collect)
             #########################################
             if dst_id in list(self.cur_table):
                 self.cur_table.pop(dst_id)
@@ -256,17 +266,22 @@ class Demon:
 
         for new_dst in new_entry:
             new_metric = new_entry[new_dst]['metric'] + link_cost
-            ###############################################################
+            ############################################################### ----- 3
             if new_dst in self.poison_collect and new_dst != self.router.rtr_id:
                 if new_dst in self.poison_collect:
                     if 0 <= new_entry[new_dst]['metric'] <= 15:
                         update = self.add_entry(update, new_dst, receive_from, new_metric)
+                        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Passing 3-1")
+                        print("poison reverse removed for router", new_dst)
                         self.poison_collect.remove(new_dst)#################
+                        print("poison reverse list", self.poison_collect )
                 if new_dst in update.keys() and new_dst in self.poison_collect:
+                    print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Passing 3-2")
                     print("poison reverse removed for router", new_dst)
                     self.poison_collect.remove(new_dst)
+                    print("poison reverse list", self.poison_collect )
                     update.pop(new_dst)
-            ################################################################
+            ################################################################ 
             elif new_dst != self.router.rtr_id:
                 new_metric = new_entry[new_dst]['metric'] + link_cost
                 #if new_dst in self.router.neighbor:
@@ -276,17 +291,28 @@ class Demon:
                     print(f"******NOTICE : NEW ROUTE FOUND : ROUTER {new_dst} IS REACHABLE******" )
                     update = self.add_entry(update, new_dst, receive_from, new_metric)
 
-                else : # if new_dst in known_dst
-                    if (new_metric < update[new_dst]['metric']):
-                        print(f"******NOTICE : BETTER ROUTE FOUND FOR ROUTER {new_dst} : COST REDUCED FROM {update[new_dst]['metric']} to {new_metric}******" )
-                        better_path = True
-                        update = self.modify_entry(update, new_dst, receive_from, new_metric)
+                else:
+                    if not current_table[new_dst]['metric']>15 : # if new_dst in known_dst
+                        if (new_metric < update[new_dst]['metric']):
+                            print(f"******NOTICE : BETTER ROUTE FOUND FOR ROUTER {new_dst} : COST REDUCED FROM {update[new_dst]['metric']} to {new_metric}******" )
+                            better_path = True
+                            update = self.modify_entry(update, new_dst, receive_from, new_metric)
+                    else :
+                        print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Passing 3-2")
+                        print("poison reverse removed for router", new_dst)
+                        self.poison_collect.remove(new_dst)
+                        print("poison reverse list", self.poison_collect )
+                        update.pop(new_dst)
+                        print("garbage time start")
+                        self.remove_garbage_collection(new_dst) 
+
                               
         self.cur_table = update
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
         if better_path :
             print("Triggered update : Send packets due to the route change")
             self.send_packet()
+        print("Poison collect list = ", self.poison_collect)
         print(f"----Updated Table--------")
         self.display_table(self.cur_table)
         return update
@@ -430,28 +456,26 @@ class Demon:
             if not (1 <= dest_id <= 64000):
                 is_valid = False
                 print("Packet Invalid : Wrong value of destination router id")
-            ##################################################################################
-            if metric in self.poison_collect:
-                if 0 <= metric <= 15 and dest_id in self.poison_collect:
-                    self.poison_collect.remove(dest_id)
-                    
-            ####################################################################################
             else :
                 if not (0 <= metric <= 15):
                     if metric >= 15:
                         if metric in self.poison_collect:
                             if dest_id in list(self.cur_table):
+                                print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Passing 2-1")
                                 self.cur_table.pop(dest_id)
                         else:
+                            print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~Passing 2-2")
                             print("poison reverse added for router ", dest_id)
                             self.poison_collect.append(dest_id)
+                            print("poison reverse added for router ", dest_id)
                             entry[dest_id] = {'next-hop': receive_from, 'metric': 16}
                     #############################################################################
                     if metric < 0:
                         flag = False
                         print("Packet Invalid : Wrong value of metric")
+            if dest_id not in self.poison_collect:
+                entry[dest_id] = {'next-hop': receive_from, 'metric': metric}
 
-            entry[dest_id] = {'next-hop': receive_from, 'metric': metric}
 
         return entry if is_valid else False
 
