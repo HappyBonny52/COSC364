@@ -149,13 +149,13 @@ class Demon:
         if timers:
             self.timers = {'periodic':int(timers[0]),'timeout':int(timers[1]), 'garbage-collection':int(timers[2])}   
         else:
-            self.timers = {'periodic':6, 'timeout':36, 'garbage-collection':24}
+            self.timers = {'periodic':6, 'timeout':10, 'garbage-collection':10}
             
         self.socket_list = self.create_socket()
 
         
-        self.posion_reverse_collects = []
-        self.cur_table = self.generate_table_entry([[self.router.rtr_id], [self.router.rtr_id], [0]])
+        self.poison_collect = []
+        self.cur_table = self.generate_table_entry([self.router.rtr_id], self.router.rtr_id, [0])
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
   
         self.display_table(self.cur_table)
@@ -176,14 +176,24 @@ class Demon:
         if self.garbage_collects.get(dst_id, None):
             del self.garbage_collects[dst_id]
             
-        if self.cur_table.get(dst_id, None):
-            self.cur_table.pop(dst_id)
-            self.send_packet()
-            
+        if self.cur_table.get(dst_id, None) and dst_id != self.router.rtr_id:
+            print("poison reverse added for router ", dst_id)
+            self.poison_collect.append(dst_id)##################
+            self.cur_table[dst_id]['metric'] = 16######################
+            print("Send new route with metric 16 of router", dst_id)
+            self.send_packet()###############################
+            ##########################################
+            for dst in self.cur_table.copy():
+                if self.cur_table[dst]['next-hop'] == dst_id:
+                    self.cur_table.pop(dst)
+            #########################################
+            if dst_id in list(self.cur_table):
+                self.cur_table.pop(dst_id)
             
         print_lock = threading.Lock()
         print_lock.acquire()
         print("Removed entry for destRtrId: ", dst_id)
+
         self.display_table(self.cur_table)
         print_lock.release()
         
@@ -199,8 +209,7 @@ class Demon:
             del self.timeouts[dst_id]
         
         if not self.garbage_collects.get(dst_id, None):
-            self.cur_table[dst_id]['metric'] = 16
-            self.send_packet()
+            print(f"Haven't heard from router {dst_id} for so long !")
             self.garbage_collects[dst_id] = Timer(self.timers['garbage-collection'], lambda: self.remove_entry(dst_id))
             self.garbage_collects[dst_id].start()
 
@@ -232,11 +241,10 @@ class Demon:
         display += '+-----------------------------------------------------------------------+\n'
         print(display)
         
-    def generate_table_entry(self, entry):
+    def generate_table_entry(self, dst_id, next_hop, cost):
         content = {}
-        dest, next_hop, metric = entry[0], entry[1], entry[2]
-        for i in range(len(dest)):
-            content[dest[i]] = {'next-hop' : next_hop[i], 'metric' : metric[i]}
+        for i in range(len(dst_id)):
+            content[dst_id[i]] = {'next-hop' : next_hop, 'metric' : cost[i]}
         return content
 
     def update_entry(self, current_table, new_entry, receive_from):
@@ -248,19 +256,32 @@ class Demon:
 
         for new_dst in new_entry:
             new_metric = new_entry[new_dst]['metric'] + link_cost
-            if new_dst in self.router.neighbor:
-                self.timeout_check(new_dst)
-                self.remove_garbage_collection(new_dst) 
-            if (new_dst not in known_dst):
-                print(f"******NOTICE : NEW ROUTE FOUND : ROUTER {new_dst} IS REACHABLE******" )
-                update = self.add_entry(update, new_dst, receive_from, new_metric)
+            ###############################################################
+            if new_dst in self.poison_collect and new_dst != self.router.rtr_id:
+                if new_dst in self.poison_collect:
+                    if 0 <= new_entry[new_dst]['metric'] <= 15:
+                        update = self.add_entry(update, new_dst, receive_from, new_metric)
+                        self.poison_collect.remove(new_dst)#################
+                if new_dst in update.keys() and new_dst in self.poison_collect:
+                    print("poison reverse removed for router", new_dst)
+                    self.poison_collect.remove(new_dst)
+                    update.pop(new_dst)
+            ################################################################
+            elif new_dst != self.router.rtr_id:
+                new_metric = new_entry[new_dst]['metric'] + link_cost
+                #if new_dst in self.router.neighbor:
+                #    self.timeout_check(new_dst)
+                #    self.remove_garbage_collection(new_dst) 
+                if (new_dst not in known_dst):
+                    print(f"******NOTICE : NEW ROUTE FOUND : ROUTER {new_dst} IS REACHABLE******" )
+                    update = self.add_entry(update, new_dst, receive_from, new_metric)
 
-            else : # if new_dst in known_dst
-                if (new_metric < update[new_dst]['metric']):
-                    print(f"******NOTICE : BETTER ROUTE FOUND FOR ROUTER {new_dst} : COST REDUCED FROM {update[new_dst]['metric']} to {new_metric}******" )
-                    better_path = True
-                    update = self.modify_entry(update, new_dst, receive_from, new_metric)
-                                    
+                else : # if new_dst in known_dst
+                    if (new_metric < update[new_dst]['metric']):
+                        print(f"******NOTICE : BETTER ROUTE FOUND FOR ROUTER {new_dst} : COST REDUCED FROM {update[new_dst]['metric']} to {new_metric}******" )
+                        better_path = True
+                        update = self.modify_entry(update, new_dst, receive_from, new_metric)
+                              
         self.cur_table = update
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
         if better_path :
@@ -298,9 +319,10 @@ class Demon:
         resp_pkt = bytearray()
 
         #adding common header into response_packet(bytearray)
-        resp_pkt += command.to_bytes(1, 'big')
-        resp_pkt += version.to_bytes(1, 'big')
-        resp_pkt += must_be_zero_as_rtr_id.to_bytes(2,'big')
+        resp_pkt += command.to_bytes(1, 'big') #command (convert int to 1byte)
+        resp_pkt += version.to_bytes(1, 'big') #version (convert int to 1byte)
+        resp_pkt += must_be_zero_as_rtr_id.to_bytes(2,'big') #must_be_zero (convert int to 2byte)
+
         #adding rip entry into response_packet(bytearray)
         resp_pkt += rip_entry
         return resp_pkt
@@ -318,18 +340,20 @@ class Demon:
         #The number of rip entry can be up to 25(including)
         """
         rip_entry = bytearray()
-        afi = 0 #afi = address family identifier
-        must_be_zero = 0
-        dest = list(entry)
-        for i in range(len(entry)): #the item in range() will be replaced by lists of list entry contents
-            #first 32 bits of rip entry
-            rip_entry += afi.to_bytes(2, 'big')
-            rip_entry += must_be_zero.to_bytes(2, 'big')
-            # second to fifth of rip entry
-            rip_entry += dest[i].to_bytes(4, 'big')
-            rip_entry += must_be_zero.to_bytes(4, 'big')
-            rip_entry += must_be_zero.to_bytes(4, 'big')
-            rip_entry += entry[dest[i]]['metric'].to_bytes(4, 'big')
+        #zeroed out components of first line in rip entry 
+        afi, must_be_zero = 0, 0 #afi = address family identifier
+
+        # destination router as ipv4 address containing its metric
+        dst_rtr = list(entry)
+        for i in range(len(entry)): #Looping entries as it can be up to 25
+            # First line in comment above
+            rip_entry += afi.to_bytes(2, 'big') #afi
+            rip_entry += must_be_zero.to_bytes(2, 'big') #must_be_zero field 
+            # Second to Fifth line in comment above 
+            rip_entry += dst_rtr[i].to_bytes(4, 'big') # destination router
+            rip_entry += must_be_zero.to_bytes(4, 'big') # must_be_zero 
+            rip_entry += must_be_zero.to_bytes(4, 'big') # must_be_zero 
+            rip_entry += entry[dst_rtr[i]]['metric'].to_bytes(4, 'big') # metric
         return rip_entry
    
     def send_packet(self):
@@ -363,7 +387,7 @@ class Demon:
         table = self.cur_table
         filtered = {}
         for dest in table:
-            if table[dest]['metric'] > 15: #posion_reverse
+            if table[dest]['metric'] > 15: #poison_reverse
                 filtered[dest] = table[dest] #not filtering entry as it has to be send to peer router 
             else:
                 if (table[dest]['next-hop'] and dest) != peer_rtr:#split_horizon
@@ -381,6 +405,7 @@ class Demon:
         version = int.from_bytes(packet[1:2], "big") #version should be 2
         rtr_id_as_ip_addr = int.from_bytes(packet[2:4], "big") 
         is_valid = True
+
         if command != 2:
             is_valid = False
             print("Packet Invalid : Wrong value of command")
@@ -405,12 +430,26 @@ class Demon:
             if not (1 <= dest_id <= 64000):
                 is_valid = False
                 print("Packet Invalid : Wrong value of destination router id")
-            if not (0 <= metric <= 15):
-                if metric > 15:
-                    self.posion_reverse_collects.append(receive_from)
-                else :
-                    flag = False
-                    print("Packet Invalid : Wrong value of metric")
+            ##################################################################################
+            if metric in self.poison_collect:
+                if 0 <= metric <= 15 and dest_id in self.poison_collect:
+                    self.poison_collect.remove(dest_id)
+                    
+            ####################################################################################
+            else :
+                if not (0 <= metric <= 15):
+                    if metric >= 15:
+                        if metric in self.poison_collect:
+                            if dest_id in list(self.cur_table):
+                                self.cur_table.pop(dest_id)
+                        else:
+                            print("poison reverse added for router ", dest_id)
+                            self.poison_collect.append(dest_id)
+                            entry[dest_id] = {'next-hop': receive_from, 'metric': 16}
+                    #############################################################################
+                    if metric < 0:
+                        flag = False
+                        print("Packet Invalid : Wrong value of metric")
 
             entry[dest_id] = {'next-hop': receive_from, 'metric': metric}
 
@@ -424,8 +463,11 @@ class Demon:
                     receive_from = list(self.router.neighbor)[i]
                     if read_socket == self.socket_list[i]:
                         print(f'\nReceived packet from router {receive_from}')
-                        #if receive_from != self.router.rtr_id:
-                        #    self.timeout_check(receive_from) #This line will initiate timeout for the peer routers
+                        if receive_from != self.router.rtr_id:
+                            self.timeout_check(receive_from) #This line will initiate timeout for the peer routers
+                            self.remove_garbage_collection(receive_from) 
+                        if receive_from in self.poison_collect:
+                            self.poison_collect.append(receive_from)
                         resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
                         checked_packet = self.is_packet_valid(resp_pkt, receive_from)
                         if  checked_packet == False:
@@ -437,8 +479,8 @@ class Demon:
                             self.update_entry(self.cur_table, checked_packet, receive_from)
                         
     def periodic_update(self):
-
-        period = round(rand.uniform(0.8*self.timers['periodic'],1.2*self.timers['periodic']), 2) #Generates random float between [0.8*periodic time, 1.2*periodic time] and rounds to 2dp
+        #Generates random float between [0.8*periodic time, 1.2*periodic time] and rounds to 2dp
+        period = round(rand.uniform(0.8*self.timers['periodic'],1.2*self.timers['periodic']), 2) 
         threading.Timer(period, self.periodic_update).start()
 
         print(f"Periodic Update : Sending packet ...... ")
