@@ -236,13 +236,14 @@ class Demon:
         display += '|  Destination  |  Next-hop  |  Cost  |  Route Change Flag  |   Timer   |\n'
         display += '+-----------------------------------------------------------------------+\n'
         for entry in contents:
-            space = '  ' if contents[entry]['metric'] < 10 else ' ' #For drawing tidy table
-            display += "|    router {0}   |  router {1}  |   {2}   |        {3}        | {4} |\n".format(entry,
+            space1 = '  ' if contents[entry]['metric'] < 10 else ' ' #For drawing tidy table
+            space2 = ' ' if self.route_change_flags[entry] else '' #For drawing tidy table
+            display += "|    router {0}   |  router {1}  |   {2}{5}  |        {3}{6}        | {4} |\n".format(entry,
                                                                                                          contents[entry]['next-hop'],
                                                                                                          contents[entry]['metric'],
                                                                                                          self.route_change_flags[entry],
                                                                                                          self.timer_status[entry],
-                                                                                                         space)
+                                                                                                         space1, space2)
         display += '+-----------------------------------------------------------------------+\n'
         print(display)
         
@@ -262,11 +263,6 @@ class Demon:
 
         for new_dst in new_entry:
             new_metric = new_entry[new_dst]['metric'] + link_cost
-            #if new_dst in self.router.neighbor:
-            #    self.timeout_check(new_dst)
-            #    self.remove_garbage_collection(new_dst) 
-            ###########################################
-            ###########################################
             if (new_dst not in self.cur_table) and new_entry[new_dst]['metric'] <= 15:
                 #if new_dst in update and update[new_dst]['metric'] <= 15:##########################
                 print(f"******NOTICE : NEW ROUTE FOUND : ROUTER {new_dst} IS REACHABLE******" )
