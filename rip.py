@@ -157,6 +157,7 @@ class Demon:
         self.socket_list = self.create_socket()
 
         self.poison_reverse_needed = set()
+        self.poison_entry_needed = set()
         self.cur_table = self.generate_table_entry([[self.router.rtr_id], [self.router.rtr_id], [0]])
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
   
@@ -174,10 +175,31 @@ class Demon:
         return socket_list
 
     def all_poison_collected(self):
-        return True if len(self.poison_reverse_needed)==0 else False
+        return True if len(self.poison_reverse_needed)==0 and len(self.poison_entry_needed)==0 else False
             
     def remove_entry(self, dst_id):
         """Simply removes the first entry with matching dst_id field"""
+        lis = []
+        for dst in self.cur_table:
+            if self.cur_table[dst]['metric']>15 or self.cur_table[dst]['metric'] ==0:
+                lis.append(dst)
+        if len(lis) == len(self.cur_table):
+            if self.garbage_collects.get(dst_id, None):
+                del self.garbage_collects[dst_id]
+            
+            if self.cur_table.get(dst_id, None) and dst_id != self.router.rtr_id:
+                self.cur_table.pop(dst_id)
+                print("Just pop its entry as it is stub router")
+                self.send_packet()
+            
+            
+            print_lock = threading.Lock()
+            print_lock.acquire()
+            print("Removed entry for destRtrId: ", dst_id)
+            self.remove_garbage_collection(dst_id)
+            self.display_table(self.cur_table)
+            print_lock.release()
+
         if self.all_poison_collected():
             if self.garbage_collects.get(dst_id, None):
                 del self.garbage_collects[dst_id]
@@ -194,7 +216,15 @@ class Demon:
             self.remove_garbage_collection(dst_id)
             self.display_table(self.cur_table)
             print_lock.release()
-        
+
+    #def is_stub(self):
+    #    is_stub = True
+    #    for dst in self.cur_table:
+    #        if self.cur_table[dst]['metric'] <=15 and self.cur_table[dst]['metric'] != 0:   
+    #            return False
+    #    return is_stub
+
+            
     def remove_garbage_collection(self, dst_id):
         """Used for removing the Timer thread object that will eventually call remove_entry(dst_id) for a given dst_id"""
         if self.garbage_collects.get(dst_id, None) :
@@ -217,18 +247,22 @@ class Demon:
                 if dst in self.router.neighbor.keys() and dst != dst_id:
                     self.poison_reverse_needed.add(dst) # Add peer router for receiving poison_reverse
             if dst_id in self.cur_table and dst_id != self.router.rtr_id:
+                print("This poison entry needed!! destination :", dst_id)
+                self.poison_entry_needed.add(dst_id)
                 self.cur_table[dst_id]['metric'] = 16
             for reachable in self.cur_table.copy():
-                if reachable != self.router.rtr_id and self.cur_table[reachable]['next-hop'] == dst_id:
-                    self.cur_table[reachable]['metric'] = 16
-                    self.route_change_flags[reachable] = True
-                    self.timer_status[reachable] = "TIMED_OUT"
-                    self.timeout_check(reachable)
+                if reachable != self.router.rtr_id:
+                    if reachable in self.cur_table:
+                        if self.cur_table[reachable]['next-hop'] == dst_id:
+                            print("This poison entry needed!! destination :", reachable)
+                            self.poison_entry_needed.add(reachable)
+                            self.cur_table[reachable]['metric'] = 16
+                            self.route_change_flags[reachable] = True
+                            self.timer_status[reachable] = "TIMED_OUT"
+                            self.timeout_check(reachable)
             if dst_id != self.router.rtr_id:
                 self.remove_entry(dst_id)
             #################################################################____________________________________________________
-
-            print("Table with poison", self.display_table(self.cur_table))
             self.send_packet()
             self.garbage_collects[dst_id] = Timer(self.timers['garbage-collection'], lambda: self.remove_entry(dst_id))
             self.garbage_collects[dst_id].start()
@@ -289,7 +323,6 @@ class Demon:
             else : # if new_dst in known_dst        
                 if new_entry[new_dst]['metric']<=15:
                     self.route_change_flags[new_dst] = False
-                    print("update: ", update)
                     if (new_metric < update[new_dst]['metric']) and new_dst not in self.poison_reverse_needed and new_metric <=15:
                         print(f"******NOTICE : BETTER ROUTE FOUND FOR ROUTER {new_dst} : COST REDUCED FROM {update[new_dst]['metric']} to {new_metric}******" )
                         self.route_change_flags[new_dst] = True
@@ -454,13 +487,13 @@ class Demon:
             if not (0 <= metric <= 15):
                 if metric > 15:
                     #######################################################################################################
-                    if receive_from in self.poison_reverse_needed:
-                        self.poison_reverse_needed.remove(receive_from)
-                    else: #router who didn't detect link crash directly
+                    if receive_from not in self.poison_reverse_needed: #router who didn't detect link crash directly
                         if dest_id in self.cur_table and dest_id != self.router.rtr_id:
                             self.route_change_flags[dest_id] = True
-                            self.timer_status[dest_id] = '         '
+                            self.timer_status[dest_id] = "TIMED_OUT"
                             self.cur_table[dest_id]['metric'] = 16
+                            print("This poison entry needed!! destination :", dest_id)
+                            self.poison_entry_needed.add(dest_id)
                             print("I received posion reverse! Just notice this through poisoned_packet")
                             print("Triggered update")
                             self.display_table(self.cur_table)
@@ -475,7 +508,14 @@ class Demon:
                     print("Packet Invalid : Wrong value of metric")
 
             entry[dest_id] = {'next-hop': receive_from, 'metric': metric}
-
+        #####################################################################################
+        if receive_from in self.poison_reverse_needed:
+            for new_dst in entry.copy():
+                if new_dst in self.poison_entry_needed and entry[new_dst]['metric']>15 :
+                    self.poison_entry_needed.remove(new_dst)
+            if len(self.poison_entry_needed) == 0:
+                self.poison_reverse_needed.remove(receive_from)
+        ######################################################################################
         return entry if is_valid else False
 
     def receive_packet(self):
