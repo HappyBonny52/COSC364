@@ -144,8 +144,11 @@ class Demon:
         """
         self.router = Router
         
+        self.route_change_flags = {self.router.rtr_id: False}
+        
+        self.timer_status = {self.router.rtr_id: "         "}
         self.timeouts = {}
-        self.garbage_collects = {}        
+        self.garbage_collects = {}
         if timers:
             self.timers = {'periodic':int(timers[0]),'timeout':int(timers[1]), 'garbage-collection':int(timers[2])}   
         else:
@@ -192,6 +195,7 @@ class Demon:
         """Used for removing the Timer thread object that will eventually call remove_entry(dst_id) for a given dst_id"""
         if self.garbage_collects.get(dst_id, None) :
             self.garbage_collects[dst_id].cancel()
+            self.timer_status[dst_id] = "         "
             del self.garbage_collects[dst_id]
     
     def garbage_collection(self, dst_id):
@@ -200,6 +204,8 @@ class Demon:
             del self.timeouts[dst_id]
         
         if not self.garbage_collects.get(dst_id, None):
+            self.route_change_flags[dst_id] = True
+            self.timer_status[dst_id] = "TIMED_OUT"
             print(f"Haven't heard from router {dst_id} for so long !")
             print(f"send packet with rtr {dst_id} with metric 16")
             if dst_id in self.cur_table :############################################################
@@ -231,9 +237,11 @@ class Demon:
         display += '+-----------------------------------------------------------------------+\n'
         for entry in contents:
             space = '  ' if contents[entry]['metric'] < 10 else ' ' #For drawing tidy table
-            display += "|    router {0}   |  router {1}  |   {2}{3}  |                     |           |\n".format(entry,
+            display += "|    router {0}   |  router {1}  |   {2}   |        {3}        | {4} |\n".format(entry,
                                                                                                          contents[entry]['next-hop'],
                                                                                                          contents[entry]['metric'],
+                                                                                                         self.route_change_flags[entry],
+                                                                                                         self.timer_status[entry],
                                                                                                          space)
         display += '+-----------------------------------------------------------------------+\n'
         print(display)
@@ -258,26 +266,30 @@ class Demon:
             #    self.timeout_check(new_dst)
             #    self.remove_garbage_collection(new_dst) 
             ###########################################
-            for reachable in self.cur_table:
-                if self.cur_table[reachable]['next-hop'] == receive_from:
-                    print(f"This entry started time out ", self.cur_table[reachable])
-                    print(f"add time out for entry with dest router {reachable}")
-                    self.timeout_check(reachable)
-                    #self.remove_garbage_collection(new_dst)
             ###########################################
-            if (new_dst not in known_dst) and new_entry[new_dst]['metric'] <= 15:
+            if (new_dst not in self.cur_table) and new_entry[new_dst]['metric'] <= 15:
                 #if new_dst in update and update[new_dst]['metric'] <= 15:##########################
                 print(f"******NOTICE : NEW ROUTE FOUND : ROUTER {new_dst} IS REACHABLE******" )
+                self.route_change_flags[new_dst] = True
+                self.timer_status[new_dst] = '         '
                 update = self.add_entry(update, new_dst, receive_from, new_metric)
 
             else : # if new_dst in known_dst
+                self.route_change_flags[new_dst] = False
                 if new_dst in self.garbage and self.cur_table[new_dst]['metric']>15:
+                    self.route_change_flags[new_dst] = True
                     self.cur_table.pop(new_dst)
                 else:
+                    print("update: ", update)
                     if (new_metric < update[new_dst]['metric']) and new_dst not in self.garbage:
                         print(f"******NOTICE : BETTER ROUTE FOUND FOR ROUTER {new_dst} : COST REDUCED FROM {update[new_dst]['metric']} to {new_metric}******" )
+                        self.route_change_flags[new_dst] = True
                         better_path = True
                         update = self.modify_entry(update, new_dst, receive_from, new_metric)
+            print(f"This entry started time out ", self.cur_table[new_dst])
+            print(f"add time out for entry with dest router {new_dst}")
+            self.timeout_check(new_dst)
+            #self.remove_garbage_collection(new_dst)            
                                     
         self.cur_table = update
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
