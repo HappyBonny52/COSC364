@@ -217,13 +217,6 @@ class Demon:
             self.display_table(self.cur_table)
             print_lock.release()
 
-    #def is_stub(self):
-    #    is_stub = True
-    #    for dst in self.cur_table:
-    #        if self.cur_table[dst]['metric'] <=15 and self.cur_table[dst]['metric'] != 0:   
-    #            return False
-    #    return is_stub
-
             
     def remove_garbage_collection(self, dst_id):
         """Used for removing the Timer thread object that will eventually call remove_entry(dst_id) for a given dst_id"""
@@ -244,8 +237,12 @@ class Demon:
             print(f"send packet with rtr {dst_id} with metric 16")
             #################################################################____________________________________________________
             for dst in self.cur_table:
-                if dst in self.router.neighbor.keys() and dst != dst_id:
-                    self.poison_reverse_needed.add(dst) # Add peer router for receiving poison_reverse
+                if not (self.cur_table[dst]['next-hop'] == dst_id):
+                    if dst in self.router.neighbor.keys() and dst != dst_id:
+                        self.poison_reverse_needed.add(dst) # Add peer router for receiving poison_reverse
+                else:
+                    self.poison_reverse_needed = set()
+                    self.poison_entry_needed = set()
             if dst_id in self.cur_table and dst_id != self.router.rtr_id:
                 print("This poison entry needed!! destination :", dst_id)
                 self.poison_entry_needed.add(dst_id)
@@ -321,7 +318,7 @@ class Demon:
                 update = self.add_entry(update, new_dst, receive_from, new_metric)
 
             else : # if new_dst in known_dst        
-                if new_entry[new_dst]['metric']<=15:
+                if new_entry[new_dst]['metric']<=15 and new_dst not in self.poison_entry_needed:
                     self.route_change_flags[new_dst] = False
                     if (new_metric < update[new_dst]['metric']) and new_dst not in self.poison_reverse_needed and new_metric <=15:
                         print(f"******NOTICE : BETTER ROUTE FOUND FOR ROUTER {new_dst} : COST REDUCED FROM {update[new_dst]['metric']} to {new_metric}******" )
@@ -336,6 +333,9 @@ class Demon:
             if self.all_poison_collected and self.cur_table[dst]['metric']>15 and dst != self.router.rtr_id:
                 self.cur_table.pop(dst)
                 print(f"Entry with destination router {dst} has been popped after receiving all needed poison_reverse")
+                print("poison entry/ reverse needed initialised with EMPTY SET")
+                self.poison_entry_needed = set()
+                self.poison_reverse_needed = set()
             if dst in self.cur_table and dst != self.router.rtr_id:
                 if self.cur_table[dst]['metric']>=17:
                     print(f"Popped for entry with dst_id {dst} __Not sure when I'm getting poison reverse")
@@ -510,6 +510,7 @@ class Demon:
             entry[dest_id] = {'next-hop': receive_from, 'metric': metric}
         #####################################################################################
         if receive_from in self.poison_reverse_needed:
+            
             for new_dst in entry.copy():
                 if new_dst in self.poison_entry_needed and entry[new_dst]['metric']>15 :
                     self.poison_entry_needed.remove(new_dst)
