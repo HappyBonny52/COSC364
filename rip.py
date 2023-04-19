@@ -152,7 +152,7 @@ class Demon:
         if timers:
             self.timers = {'periodic':int(timers[0]),'timeout':int(timers[1]), 'garbage-collection':int(timers[2])}   
         else:
-            self.timers = {'periodic':10, 'timeout':15, 'garbage-collection':3}
+            self.timers = {'periodic':1, 'timeout':6, 'garbage-collection':4}
             
         self.socket_list = self.create_socket()
 
@@ -318,7 +318,8 @@ class Demon:
                 self.timer_status[new_dst] = '         '
                 update = self.add_entry(update, new_dst, receive_from, new_metric)
 
-            else : # if new_dst in known_dst        
+            else : # if new_dst in known_dst     
+                self.route_change_flags[new_dst] = False
                 if new_entry[new_dst]['metric']>15:
                     if new_dst != self.router.rtr_id:
                         self.cur_table[new_dst]['metric']=16
