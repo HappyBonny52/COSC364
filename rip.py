@@ -187,7 +187,9 @@ class Demon:
         self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
         self.update_periodic()
         self.packet_exchange()
+
     #______Process Packet__________________________________________________________________________________
+
     def create_socket(self):
         """Creating UDP sockets and to bind one with each of input_port"""
         socket_list = []
@@ -375,6 +377,7 @@ class Demon:
             del self.garbage_collects[dst_id]
 
     #_____Link change Event_________________________________________________________________________________
+
     def update_periodic(self):
         #Generates random float between [0.8*periodic time, 1.2*periodic time] and rounds to 2dp
         period = round(rand.uniform(0.8*self.timers['periodic'],1.2*self.timers['periodic']), 2)
@@ -541,14 +544,6 @@ class Demon:
 
     def handle_collected_all_poison_reverse(self):
         return True if (len(self.poison_reverse_needed)==0 and len(self.poison_entry_needed)==0) else False
-
-
-
-
-
-                     
-
-
 
 
 if __name__ == "__main__":
