@@ -4,11 +4,9 @@
 import sys
 import select
 import socket
+import threading
 import random as rand
 from threading import Timer, Lock
-import threading
-
-
 RECV_BUFFSIZE = 1024 
 
 class Config:
@@ -124,239 +122,44 @@ class Router:
     def __init__(self,  rtrId, inputs, outputs):
         
         self.rtr_id = rtrId # of type int
-        self.inputs = inputs
-        self.neighbor = self.decompose_output(outputs)
+        self.inputs = inputs # list of input ports
+        self.neighbor = self.decompose_output(outputs) # dictionary of peer routers
+        #neighbor contains corresponding output port and link cost info)
     
     def decompose_output(self, outputs):
-        """split output format by '-' and sort by each item into list
-        # output format [peer's_input_port - metric(link cost) - peer's router id (peer's_input_port is equal to current router's output_port)]"""
-        #split output by '-'
+        """split output format by '-' and make dictionary"""
+        #(peer's_input_port is equal to current router's output_port)
+        #Output format : [peer's_input_port - metric(link cost) - peer's router id]
+        #neighbor format : {dest_id: {'cost' : cost_val, 'output' : output_val}}
         neighbor = {}
         for output in outputs:
             neighbor[int(output.split('-')[2])] = {'cost': int(output.split('-')[1]), 
                                                    'output' : int(output.split('-')[0])}
-        return neighbor
+        return neighbor 
 
-class Demon:
-    def __init__(self, Router, timers=None):
-        """Initialize Demon with input ports for creating UDP sockets 
-        <socket_list> : list of binded sockets indexed in its corresponding input port
-        """
-        self.router = Router
-        
-        self.route_change_flags = {self.router.rtr_id: False}
-        
-        self.timer_status = {self.router.rtr_id: "         "}
-        self.timeouts = {}
-        self.garbage_collects = {}
-        if timers:
-            self.timers = {'periodic':int(timers[0]),'timeout':int(timers[1]), 'garbage-collection':int(timers[2])}   
-        else:
-            self.timers = {'periodic':1, 'timeout':6, 'garbage-collection':4}
-            
-        self.socket_list = self.create_socket()
-
-        self.poison_reverse_needed = set()
-        self.poison_entry_needed = set()
-        self.cur_table = self.generate_table_entry([[self.router.rtr_id], [self.router.rtr_id], [0]])
-        self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
-  
-        self.display_table(self.cur_table)
-        self.periodic_update()
-        self.packet_exchange()
-
-    def create_socket(self):
-        """Creating UDP sockets and to bind one with each of input_port"""
-        socket_list = []
-        for i in range(len(self.router.inputs)):
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.bind(('127.0.0.1', int(self.router.inputs[i]))) #bind with local host         
-            socket_list.append(sock)
-        return socket_list
-
-    def all_poison_collected(self):
-        return True if len(self.poison_reverse_needed)==0 and len(self.poison_entry_needed)==0 else False
-            
-    def remove_entry(self, dst_id):
-        """Simply removes the first entry with matching dst_id field"""
-        lis = []
-        for dst in self.cur_table:
-            if self.cur_table[dst]['metric']>15 or self.cur_table[dst]['metric'] ==0:
-                lis.append(dst)
-        if len(lis) == len(self.cur_table):
-            if self.garbage_collects.get(dst_id, None):
-                del self.garbage_collects[dst_id]
-            
-            if self.cur_table.get(dst_id, None) and dst_id != self.router.rtr_id:
-                self.cur_table.pop(dst_id)
-                print("Just pop its entry as it is stub router")
-                self.send_packet()
-            
-            
-            print_lock = threading.Lock()
-            print_lock.acquire()
-            print("Removed entry for destRtrId: ", dst_id)
-            self.remove_garbage_collection(dst_id)
-            self.display_table(self.cur_table)
-            print_lock.release()
-
-        if self.all_poison_collected():
-            if self.garbage_collects.get(dst_id, None):
-                del self.garbage_collects[dst_id]
-            
-            if self.cur_table.get(dst_id, None) and dst_id != self.router.rtr_id:
-                self.cur_table.pop(dst_id)
-                print("All poison reversed received!")
-                self.send_packet()
-            
-            
-            print_lock = threading.Lock()
-            print_lock.acquire()
-            print("Removed entry for destRtrId: ", dst_id)
-            self.remove_garbage_collection(dst_id)
-            self.display_table(self.cur_table)
-            print_lock.release()
-
-            
-    def remove_garbage_collection(self, dst_id):
-        """Used for removing the Timer thread object that will eventually call remove_entry(dst_id) for a given dst_id"""
-        if self.garbage_collects.get(dst_id, None) :
-            self.garbage_collects[dst_id].cancel()
-            self.timer_status[dst_id] = "         "
-            del self.garbage_collects[dst_id]
-    
-    def garbage_collection(self, dst_id):
-        """Used for adding a Timer thread object that will eventually call remove_entry(dst_id) for a given dst_id"""
-        if self.timeouts.get(dst_id, None):
-            del self.timeouts[dst_id]
-        
-        if not self.garbage_collects.get(dst_id, None):
-            self.route_change_flags[dst_id] = True
-            self.timer_status[dst_id] = "TIMED_OUT"
-            print(f"Haven't heard from router {dst_id} for so long !")
-            print(f"send packet with rtr {dst_id} with metric 16")
-            #################################################################____________________________________________________
-            for dst in self.cur_table:
-                if not (self.cur_table[dst]['next-hop'] == dst_id):
-                    if dst in self.router.neighbor.keys() and dst != dst_id:
-                        self.poison_reverse_needed.add(dst) # Add peer router for receiving poison_reverse
-                else:
-                    self.poison_reverse_needed = set()
-                    self.poison_entry_needed = set()
-            if dst_id in self.cur_table and dst_id != self.router.rtr_id:
-                print("This poison entry needed!! destination :", dst_id)
-                self.poison_entry_needed.add(dst_id)
-                self.cur_table[dst_id]['metric'] = 16
-            for reachable in self.cur_table.copy():
-                if reachable != self.router.rtr_id:
-                    if reachable in self.cur_table:
-                        if self.cur_table[reachable]['next-hop'] == dst_id:
-                            print("This poison entry needed!! destination :", reachable)
-                            self.poison_entry_needed.add(reachable)
-                            if reachable in self.cur_table:
-                                self.cur_table[reachable]['metric'] = 16
-                                self.route_change_flags[reachable] = True
-                                self.timer_status[reachable] = "TIMED_OUT"
-                                self.timeout_check(reachable)
-            if dst_id != self.router.rtr_id:
-                self.remove_entry(dst_id)
-            #################################################################____________________________________________________
-            self.send_packet()
-            self.garbage_collects[dst_id] = Timer(self.timers['garbage-collection'], lambda: self.remove_entry(dst_id))
-            self.garbage_collects[dst_id].start()
-
-    def timeout_check(self, dst_id):
-        """
-        For a given dst_id, it either adds a new Timer thread object that will eventually call garbage_collection(dst_id)
-        OR
-        'Refreshes' the timer for given dst_id in self.timeouts dictionary by creating a new Timer thread object
-        it should be fine on memory because of python garbage collection as long as the old Timer thread object isn't referenced anywhere else**********
-        """        
-        if self.timeouts.get(dst_id, None):
-            self.timeouts[dst_id].cancel()
-            del self.timeouts[dst_id]
-        self.timeouts[dst_id] = Timer(self.timers['timeout'], lambda: self.garbage_collection(dst_id))
-        self.timeouts[dst_id].start()
-
-    def display_table(self, contents):
-        dest = list(contents)
-        display = f"Routing table of router {self.router.rtr_id}\n"
+    def display_table(self, contents, flag, timer):
+        display = f"Routing table of router {self.rtr_id}\n"
         display += '+-----------------------------------------------------------------------+\n'
         display += '|  Destination  |  Next-hop  |  Cost  |  Route Change Flag  |   Timer   |\n'
         display += '+-----------------------------------------------------------------------+\n'
         for entry in contents:
             space1 = '  ' if contents[entry]['metric'] < 10 else ' ' #For drawing tidy table
-            space2 = ' ' if self.route_change_flags[entry] else '' #For drawing tidy table
+            space2 = ' ' if flag[entry] else '' #For drawing tidy table
             display += "|    router {0}   |  router {1}  |   {2}{5}  |        {3}{6}        | {4} |\n".format(entry,
                                                                                                          contents[entry]['next-hop'],
                                                                                                          contents[entry]['metric'],
-                                                                                                         self.route_change_flags[entry],
-                                                                                                         self.timer_status[entry],
+                                                                                                         flag[entry],
+                                                                                                         timer[entry],
                                                                                                          space1, space2)
         display += '+-----------------------------------------------------------------------+\n'
         print(display)
         
-    def generate_table_entry(self, entry):
+    def generate_table(self, entry):
         content = {}
         dest, next_hop, metric = entry[0], entry[1], entry[2]
         for i in range(len(dest)):
             content[dest[i]] = {'next-hop' : next_hop[i], 'metric' : metric[i]}
         return content
-
-    def update_entry(self, current_table, new_entry, receive_from):
-        update = current_table
-        print(f"----Current_table-------- \n{update}\n")
-        link_cost = self.router.neighbor[receive_from]['cost']
-        known_dst = list(current_table)
-        better_path = False
-
-        for new_dst in new_entry:
-            new_metric = new_entry[new_dst]['metric'] + link_cost
-            if (new_dst not in self.cur_table) :
-                print(f"******NOTICE : NEW ROUTE FOUND : ROUTER {new_dst} IS REACHABLE******" )
-                self.route_change_flags[new_dst] = True
-                self.timer_status[new_dst] = '         '
-                update = self.add_entry(update, new_dst, receive_from, new_metric)
-
-            else : # if new_dst in known_dst     
-                self.route_change_flags[new_dst] = False
-                if new_entry[new_dst]['metric']>15:
-                    if new_dst != self.router.rtr_id:
-                        self.cur_table[new_dst]['metric']=16
-                        self.route_change_flags[new_dst] = True
-                        self.timer_status[new_dst]= "TIMED_OUT"
-                else:
-                    if new_entry[new_dst]['metric']<=15 and new_dst not in self.poison_entry_needed:
-                        self.route_change_flags[new_dst] = False
-                        if (new_metric < update[new_dst]['metric']) and new_dst not in self.poison_reverse_needed and new_metric <=15:
-                            print(f"******NOTICE : BETTER ROUTE FOUND FOR ROUTER {new_dst} : COST REDUCED FROM {update[new_dst]['metric']} to {new_metric}******" )
-                            self.route_change_flags[new_dst] = True
-                            better_path = True
-                            update = self.modify_entry(update, new_dst, receive_from, new_metric)           
-                                    
-        self.cur_table = update
-        self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
-        ################################
-        for dst in self.cur_table.copy():
-            if self.all_poison_collected and self.cur_table[dst]['metric']>15 and dst != self.router.rtr_id:
-                self.cur_table.pop(dst)
-                print(f"Entry with destination router {dst} has been popped after receiving all needed poison_reverse")
-                print("poison entry/ reverse needed initialised with EMPTY SET")
-                self.poison_entry_needed = set()
-                self.poison_reverse_needed = set()
-            if dst in self.cur_table and dst != self.router.rtr_id:
-                if self.cur_table[dst]['metric']>=16:
-                    print(f"Popped for entry with dst_id {dst} __Not sure when I'm getting poison reverse")
-                    self.cur_table.pop(dst)
-               
-        self.display_table(self.cur_table)
-        #################################
-        if better_path :
-            print("Triggered update : Send packets due to the route change")
-            self.send_packet()
-        print(f"----Updated Table--------")
-        self.display_table(self.cur_table)
-        return update
 
     def add_entry(self, table, dst_rtr, next_hop, cost):
         table[dst_rtr] = {'next-hop' : next_hop , 'metric' : cost}
@@ -366,32 +169,33 @@ class Demon:
         table[dst_rtr]['next-hop'] = next_hop
         table[dst_rtr]['metric'] = cost 
         return table
-        
-    def rip_response_packet(self, rip_entry):
-        """
-        #   RIP PACKET FORMAT
-        #+--------------------------------------------------------------+
-        #|  command(1 byte) + version (1 byte) +   must_be_zero(2bytes) |
-        #|--------------------------------------------------------------|
-        #|       rip entry(20 bytes) * the number of rip entry          |
-        #+--------------------------------------------------------------+
-        #The number of rip entry can be up to 25(including) 
-        #rip entry will be received as an bytearray from compose_rip_entry() 
-        #and is added to the end of rip packet.
-        """
-        #components of common header
-        command, version, must_be_zero_as_rtr_id = 2, 2, self.router.rtr_id
-   
-        #create bytearray for response_packet
-        resp_pkt = bytearray()
 
-        #adding common header into response_packet(bytearray)
-        resp_pkt += command.to_bytes(1, 'big')
-        resp_pkt += version.to_bytes(1, 'big')
-        resp_pkt += must_be_zero_as_rtr_id.to_bytes(2,'big')
-        #adding rip entry into response_packet(bytearray)
-        resp_pkt += rip_entry
-        return resp_pkt
+class Demon:
+    def __init__(self, Router, timers=None):
+        if timers:
+            self.timers = {'periodic':int(timers[0]),'timeout':int(timers[1]), 'garbage-collection':int(timers[2])}   
+        else:
+            self.timers = {'periodic':1, 'timeout':6, 'garbage-collection':4}
+        self.router = Router
+        self.route_change_flags = {self.router.rtr_id: False}
+        self.timer_status = {self.router.rtr_id: "         "}
+        self.timeouts, self.garbage_collects = {}, {}
+        self.poison_reverse_needed, self.poison_entry_needed= set(), set()
+        self.socket_list = self.create_socket()
+        self.cur_table = self.router.generate_table([[self.router.rtr_id], [self.router.rtr_id], [0]])
+        self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
+        self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
+        self.update_periodic()
+        self.packet_exchange()
+    #______Process Packet__________________________________________________________________________________
+    def create_socket(self):
+        """Creating UDP sockets and to bind one with each of input_port"""
+        socket_list = []
+        for i in range(len(self.router.inputs)):
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.bind(('127.0.0.1', int(self.router.inputs[i]))) #bind with local host         
+            socket_list.append(sock)
+        return socket_list
 
     def compose_rip_entry(self, entry):
         """
@@ -419,15 +223,49 @@ class Demon:
             rip_entry += must_be_zero.to_bytes(4, 'big')
             rip_entry += entry[dest[i]]['metric'].to_bytes(4, 'big')
         return rip_entry
+
+    def rip_response_packet(self, rip_entry):
+        """
+        #   RIP PACKET FORMAT
+        #+--------------------------------------------------------------+
+        #|  command(1 byte) + version (1 byte) +   must_be_zero(2bytes) |
+        #|--------------------------------------------------------------|
+        #|       rip entry(20 bytes) * the number of rip entry          |
+        #+--------------------------------------------------------------+
+        #The number of rip entry can be up to 25(including) 
+        #rip entry will be received as an bytearray from compose_rip_entry() 
+        #and is added to the end of rip packet.
+        """
+        #components of common header
+        command, version, must_be_zero_as_rtr_id = 2, 2, self.router.rtr_id
+   
+        #create bytearray for response_packet
+        resp_pkt = bytearray()
+
+        #adding common header into response_packet(bytearray)
+        resp_pkt += command.to_bytes(1, 'big')
+        resp_pkt += version.to_bytes(1, 'big')
+        resp_pkt += must_be_zero_as_rtr_id.to_bytes(2,'big')
+        #adding rip entry into response_packet(bytearray)
+        resp_pkt += rip_entry
+        return resp_pkt
+
+    def split_horizon_with_poison_reverse(self, peer_rtr, port):
+        """Generate a customized packet with split_horizon allowing poison reverse"""
+        filtered = {}
+        for dest in self.cur_table:
+            #posion_reverse
+            if self.cur_table[dest]['metric'] > 15: 
+                #not filtering entry as it has to be send to peer router 
+                filtered[dest] = self.cur_table[dest] 
+            else:
+                #split_horizon
+                if (self.cur_table[dest]['next-hop'] and dest) != peer_rtr:
+                    #filter entry with not known information to peer router
+                    filtered[dest] = self.cur_table[dest]
+        return self.rip_response_packet(self.compose_rip_entry(filtered))
    
     def send_packet(self):
-        #randomized periodic update for sending packet
-        #i used this for debugging timers -david
-        """
-        self.display_table(self.cur_table)
-        print(threading.enumerate())
-        print(self.timeouts)
-        print(self.garbage_collects)"""
         peer = self.router.neighbor
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sending_socket:
                 for i in range(len(peer)):
@@ -436,37 +274,40 @@ class Demon:
                     customized_pkt = self.split_horizon_with_poison_reverse(peer_rtr, port) #customized_packet for each output
                     sending_socket.sendto(customized_pkt, ('127.0.0.1', port)) 
 
-    def split_horizon_with_poison_reverse(self, peer_rtr, port):
-        """
-        Implement split_horizon by filtering entries and generate customized packet for each peer router.
-        Customization : Remove entries that indicate connected peer router(who will be received packet)
-        is known as the next hop router with the minimum cost to reach a certain destination router
-        in current routing table.
-        In short, check if the router receiving this packet already knows about this information
-        if it does[it means entries are redundant for peer router], then filter this information 
-        and send the other information in routing table
-        For poison_reverse, split-horizon-filter process will not be conducted for entry with metric more than 15
-        and apply split horizon to the other entries
-        """
-        filtered = {}
-        for dest in self.cur_table:
-            if self.cur_table[dest]['metric'] > 15: #posion_reverse
-                filtered[dest] = self.cur_table[dest] #not filtering entry as it has to be send to peer router 
-            else:
-                if (self.cur_table[dest]['next-hop'] and dest) != peer_rtr:#split_horizon
-                    filtered[dest] = self.cur_table[dest]#filtered entry from if condition is added to the rip entry for packet
-        return self.rip_response_packet(self.compose_rip_entry(filtered))
-    
+    def receive_packet(self):
+        while True:
+            read_socket_lis, _, _ = select.select(self.socket_list, [], [])
+            for read_socket in read_socket_lis:
+                for i in range(len(self.router.inputs)):
+                    receive_from = list(self.router.neighbor)[i]
+                    if read_socket == self.socket_list[i]:
+                        print(f'\nReceived packet from router {receive_from}')
+                        if receive_from != self.router.rtr_id:
+                            self.timer_timeout(receive_from) #This line will initiate timeout for the peer routers                             
+                        resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
+                        checked_packet = self.is_packet_valid(resp_pkt, receive_from)
+                        if  checked_packet:
+                            self.response_pkt = resp_pkt
+                            self.update_entry(checked_packet, receive_from)
+                        else:
+                            print(f"Received packet from router {receive_from} failed validity check!\nDrop this packet....")
+
+    def packet_exchange(self):
+        try:
+            while True:
+                self.receive_packet()
+                raise KeyboardInterrupt
+
+        except KeyboardInterrupt:
+            print('Keyboard Interrupted!')
+        sys.exit(1)
+
     def is_packet_valid(self, packet, receive_from):
-        #===========================================================================#
-        #__________________Codes here need to be cleaned____________________________#
-        #____________Coded Roughly in order to implement poison reverse_____________#
-        #___________________________________________________________________________#
-        #===========================================================================#
+        """Chekc if the received packet is valid return packet contents if True else return False """
         entry = {}
         command = int.from_bytes(packet[0:1], "big") #command should be 2
         version = int.from_bytes(packet[1:2], "big") #version should be 2
-        rtr_id_as_ip_addr = int.from_bytes(packet[2:4], "big") 
+        rtr_id_as_ip_addr = int.from_bytes(packet[2:4], "big") #This should be in range of 1024 <= x <= 64000
         is_valid = True
         if command != 2:
             is_valid = False
@@ -474,15 +315,15 @@ class Demon:
         if  version != 2:
             is_valid = False
             print("Packet Invalid : Wrong value of version")
-        if not (1 <= rtr_id_as_ip_addr <= 64000) : #This should be in range of 1024 <= x <= 64000
+        if not (1 <= rtr_id_as_ip_addr <= 64000) : 
             is_valid = False
             print("Packet Invalid : Wrong value of router")
 
         for i in range((len(packet)-4)// 20):
-            afi = (int.from_bytes(packet[4+20*i:6+20*i], "big"))
-            must_be_zeros = ( int.from_bytes(packet[6+20*i:8+20*i], "big") +  int.from_bytes(packet[12+20*i:20+20*i], "big") ) 
-            dest_id = int.from_bytes(packet[(8+20*i):(12+20*i)], "big")
-            metric= int.from_bytes(packet[(20+20*i):(24+20*i)], "big")
+            afi = (int.from_bytes(packet[4+20*i:6+20*i], "big")) #afi should be 0
+            must_be_zeros = ( int.from_bytes(packet[6+20*i:8+20*i], "big") +  int.from_bytes(packet[12+20*i:20+20*i], "big") )
+            dest_id = int.from_bytes(packet[(8+20*i):(12+20*i)], "big") #This should be in range of 1024 <= x <= 64000
+            metric= int.from_bytes(packet[(20+20*i):(24+20*i)], "big") #This should be in range of 0 <= x <= 15
             if afi != 0:
                 is_valid = False
                 print("Packet Invalid : Wrong value of address family identifier")
@@ -494,76 +335,220 @@ class Demon:
                 print("Packet Invalid : Wrong value of destination router id")
             if not (0 <= metric <= 15):
                 if metric > 15:
-                    #######################################################################################################
-                    if receive_from not in self.poison_reverse_needed: #router who didn't detect link crash directly
-                        if dest_id in self.cur_table and dest_id != self.router.rtr_id:
-                            self.route_change_flags[dest_id] = True
-                            self.timer_status[dest_id] = "TIMED_OUT"
-                            self.cur_table[dest_id]['metric'] = 16
-                            print("This poison entry needed!! destination :", dest_id)
-                            self.poison_entry_needed.add(dest_id)
-                            print("I received posion reverse! Just notice this through poisoned_packet")
-                            print("Triggered update")
-                            self.display_table(self.cur_table)
-                            for dst in self.cur_table:
-                                if dst in self.router.neighbor.keys():
-                                    print("I need to receive poison back from PEER ", dst)
-                                    self.poison_reverse_needed.add(dst) # Add peer router for receiving poison_reverse
-                            self.send_packet()
-                    ###########################################################################################################        
+                    self.handle_received_poison(receive_from, dest_id)     
                 else :
                     flag = False
                     print("Packet Invalid : Wrong value of metric")
 
             entry[dest_id] = {'next-hop': receive_from, 'metric': metric}
-        #####################################################################################
-        if receive_from in self.poison_reverse_needed:
+        self.handle_poison_reverse(receive_from, entry)
+        return entry if is_valid else False
+
+    #_____Timer Event_______________________________________________________________________________________
+
+    def timer_timeout(self, dst_id):
+        """For a given dst_id, it either adds a new Timer thread object that will eventually call garbage_collection(dst_id)
+        OR 'Refreshes' the timer for given dst_id in self.timeouts dictionary by creating a new Timer thread object"""
+        #it should be fine on memory because of python garbage collection 
+        #as long as the old Timer thread object isn't referenced anywhere else    
+        if self.timeouts.get(dst_id, None):
+            self.timeouts[dst_id].cancel()
+            del self.timeouts[dst_id]
+        self.timeouts[dst_id] = Timer(self.timers['timeout'], lambda: self.timer_garbage_collection(dst_id))
+        self.timeouts[dst_id].start()
+
+    def timer_garbage_collection(self, dst_id):
+        """Used for adding a Timer thread object that will eventually call event_remove(dst_id) for a given dst_id"""
+        if self.timeouts.get(dst_id, None):
+            del self.timeouts[dst_id]
+        
+        if not self.garbage_collects.get(dst_id, None):
+            self.handle_crashed_link(dst_id)
+            self.garbage_collects[dst_id] = Timer(self.timers['garbage-collection'], lambda: self.event_remove(dst_id))
+            self.garbage_collects[dst_id].start()
+
+    def timer_remove_garbage_collection(self, dst_id):
+        """Used for removing the Timer thread object that will eventually call event_remove(dst_id) for a given dst_id"""
+        if self.garbage_collects.get(dst_id, None) :
+            self.garbage_collects[dst_id].cancel()
+            self.timer_status[dst_id] = "         "
+            del self.garbage_collects[dst_id]
+
+    #_____Link change Event_________________________________________________________________________________
+    def update_periodic(self):
+        #Generates random float between [0.8*periodic time, 1.2*periodic time] and rounds to 2dp
+        period = round(rand.uniform(0.8*self.timers['periodic'],1.2*self.timers['periodic']), 2)
+        threading.Timer(period, self.update_periodic).start()
+
+        print(f"Periodic Update : Sending packet ...... ")
+        self.send_packet()                 
+    
+    def event_remove(self, dst_id):
+        """Simply removes the first entry with matching dst_id field"""
+        lis = []
+        for dst in self.cur_table:
+            if self.cur_table[dst]['metric']>15 or self.cur_table[dst]['metric'] == 0:
+                lis.append(dst)
+        #if the router becomes a stub_router
+        if len(lis) == len(self.cur_table):
+            self.remove_entry(dst_id, is_stub = True)
+
+        #if the router is connected with one or more reachable routers
+        if self.handle_collected_all_poison_reverse():
+            self.remove_entry(dst_id, is_stub = False)
+
+    def event_timeout(self, dst_id):
+        if dst_id in self.cur_table:
+            self.cur_table[dst_id]['metric']=16
+            self.timer_status[dst_id]= "TIMED_OUT"
+            self.route_change_flags[dst_id] = True 
+
+    def remove_entry(self, dst_id, is_stub): 
+        if self.garbage_collects.get(dst_id, None):
+                del self.garbage_collects[dst_id]
             
+        if self.cur_table.get(dst_id, None) and dst_id != self.router.rtr_id:
+            print("All poison reverse received!") if not is_stub else print("As stubbed, remove unreachable ROUTE ", dst_id)
+            self.cur_table.pop(dst_id)
+            self.send_packet()
+              
+        print_lock = threading.Lock()
+        print_lock.acquire()
+        print(f"Removed entry for ROUTE : {dst_id} \n")
+        self.timer_remove_garbage_collection(dst_id)
+        self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
+        print_lock.release()
+
+    def update_entry(self, new_entry, receive_from):
+        select_route = False
+        for new_dst in new_entry:
+            #new_metric = cost received + connected link cost
+            new_metric = new_entry[new_dst]['metric'] + self.router.neighbor[receive_from]['cost'] 
+            # if new_dst not in known_dst in current routing table 
+            if (new_dst not in self.cur_table) and new_entry[new_dst]['metric'] != 16:       
+                self.timer_status[new_dst] = '         '
+                self.route_change_flags[new_dst] = True
+                print(f"******NOTICE : NEW ROUTE FOUND : ROUTER {new_dst} IS REACHABLE******" )
+                self.cur_table = self.router.add_entry(self.cur_table, new_dst, receive_from, new_metric)
+            else : # if new_dst in known_dst in current routing table    
+                select_route = True
+                route = self.handle_route_convergence(new_entry, new_metric, new_dst, receive_from)   
+                                    
+        self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
+        self.handle_unreachable_route()
+        if select_route :
+            self.handle_route(route)
+        print("\nUpdated Table")
+        self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
+
+    def handle_route(self, route):
+        better_route, poison_route = route[0], route[1]
+        if better_route :
+            print("Triggered update : Send packets due to the route change")
+            self.send_packet()
+        if poison_route:
+            print("\nPosion received!")
+            print("Updated poisoned_route\n")
+            self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
+
+    def handle_crashed_link(self, dst_id):
+        """Handler for router directly connected with crashed one"""
+        print(f"Route for reaching * ROUTER {dst_id} * crashed!")
+        for dst in self.cur_table:
+            if not (self.cur_table[dst]['next-hop'] == dst_id):
+                if dst in self.router.neighbor.keys() and dst != dst_id:
+                    self.poison_reverse_needed.add(dst) # Add peer router for receiving poison_reverse
+            else:
+                self.poison_reverse_needed = set()
+                self.poison_entry_needed = set()
+
+        if dst_id in self.cur_table and dst_id != self.router.rtr_id:
+            self.poison_entry_needed.add(dst_id)
+            self.event_timeout(dst_id)
+
+        self.handle_route_via_crashed_rtr(dst_id)
+
+    def handle_poison_reverse(self, receive_from, entry):
+        """Handle Event for router directly connected with crashed router
+        As soon as it notices the peer router down, send poison to other alive peer routers. 
+        This function is for processing with poison reverse from which it sent"""
+        if receive_from in self.poison_reverse_needed:
             for new_dst in entry.copy():
                 if new_dst in self.poison_entry_needed and entry[new_dst]['metric']>15 :
                     self.poison_entry_needed.remove(new_dst)
-            if len(self.poison_entry_needed) == 0:
-                self.poison_reverse_needed.remove(receive_from)
-        ######################################################################################
-        return entry if is_valid else False
+        if len(self.poison_entry_needed) == 0 and receive_from in self.poison_reverse_needed:
+           self.poison_reverse_needed.remove(receive_from)
 
-    def receive_packet(self):
-        while True:
-            read_socket_lis, _, _ = select.select(self.socket_list, [], [])
-            for read_socket in read_socket_lis:
-                for i in range(len(self.router.inputs)):
-                    receive_from = list(self.router.neighbor)[i]
-                    if read_socket == self.socket_list[i]:
-                        print(f'\nReceived packet from router {receive_from}')
-                        if receive_from != self.router.rtr_id:
-                            self.timeout_check(receive_from) #This line will initiate timeout for the peer routers                             
-                        resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
-                        checked_packet = self.is_packet_valid(resp_pkt, receive_from)
-                        if  checked_packet == False:
-                            print(f"Received packet from router {receive_from} failed validity check!\nDrop this packet....")
-                        else:
-                            self.response_pkt = resp_pkt
-                            
-                            print(f"----Received entries-----\n{checked_packet}")
-                            self.update_entry(self.cur_table, checked_packet, receive_from)
-                        
-    def periodic_update(self):
+    def handle_received_poison(self, receive_from, dest_id):
+        """Handle event for routers who didn't detect crashed router directly 
+        but who has received info about crashed router from peer router"""
+        if receive_from not in self.poison_reverse_needed: #router who didn't detect link crash directly
+            if dest_id in self.cur_table and dest_id != self.router.rtr_id:
+                self.event_timeout(dest_id)
+                self.poison_entry_needed.add(dest_id)
+                print(f"POISON REVERSE received : ROUTE to {dest_id}")
+                for dst in self.cur_table:
+                    if dst in self.router.neighbor.keys() and dst != dest_id:
+                        self.poison_reverse_needed.add(dst) # Add peer router for receiving poison_reverse
+                        #self.event_timeout(dst)
+                self.send_packet()
+        print("\nTriggered update")
+        self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
 
-        period = round(rand.uniform(0.8*self.timers['periodic'],1.2*self.timers['periodic']), 2) #Generates random float between [0.8*periodic time, 1.2*periodic time] and rounds to 2dp
-        threading.Timer(period, self.periodic_update).start()
+    def handle_route_convergence(self, new_entry, new_metric, new_dst, receive_from):
+        better_route = False
+        poison_route = False
+        self.route_change_flags[new_dst] = False
 
-        print(f"Periodic Update : Sending packet ...... ")
-        self.send_packet()
-                       
-    def packet_exchange(self):
-        try:
-            while True:
-                self.receive_packet()
-                raise KeyboardInterrupt
+        if new_entry[new_dst]['metric'] > 15:
+            if new_dst != self.router.rtr_id:
+                self.event_timeout(new_dst)
+                poison_route = True
+            else:
+                if new_entry[new_dst]['metric']<=15 and new_dst not in self.poison_entry_needed:
+                    #if new_dst in self.cur_table:
+                    self.route_change_flags[new_dst] = False
+                    if (new_metric < self.cur_table[new_dst]['metric']) and new_dst not in self.poison_reverse_needed and new_metric <=15:
+                        better_route = True
+                        print(f"******NOTICE : BETTER ROUTE FOUND FOR ROUTER******")
+                        print(f"ROUTE {new_dst} : cost reduced from {self.cur_table[new_dst]['metric']} to {new_metric}")
+                        self.route_change_flags[new_dst] = True
+                        self.cur_table = self.router.modify_entry(self.cur_table, new_dst, receive_from, new_metric)   
+        return (better_route, poison_route)
 
-        except KeyboardInterrupt:
-            print('Keyboard Interrupted!')
-        sys.exit(1)
+    def handle_unreachable_route(self):
+        for dst in self.cur_table.copy():
+            if self.handle_collected_all_poison_reverse and self.cur_table[dst]['metric']>15 and dst != self.router.rtr_id:
+                #self.cur_table.pop(dst)
+                print(f"\nRoute to {dst} has been popped ; all poison_reverse received")
+                self.poison_entry_needed = set()
+                self.poison_reverse_needed = set()
+                self.cur_table.pop(dst)
+               
+        #self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
+
+    def handle_route_via_crashed_rtr(self, dst_id):
+        for reachable in self.cur_table.copy():
+            if reachable != self.router.rtr_id:
+                if reachable in self.cur_table:
+                    if self.cur_table[reachable]['next-hop'] == dst_id:
+                        self.poison_entry_needed.add(reachable)
+                        self.event_timeout(reachable)
+                        self.timer_timeout(reachable)
+        if dst_id != self.router.rtr_id:
+            self.event_remove(dst_id)
+        self.send_packet() 
+
+    def handle_collected_all_poison_reverse(self):
+        return True if (len(self.poison_reverse_needed)==0 and len(self.poison_entry_needed)==0) else False
+
+
+
+
+
+                     
+
+
 
 
 if __name__ == "__main__":
