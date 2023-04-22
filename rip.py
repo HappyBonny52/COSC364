@@ -374,6 +374,7 @@ class Demon:
             if dst_id != self.router.rtr_id:
                 self.entry_timeout(dst_id)
             print(f"Route for reaching * ROUTER {dst_id} * crashed!")
+            self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
             self.send_packet()
             self.garbage_collects[dst_id] = Timer(self.timers['garbage-collection'], lambda: self.entry_remove(dst_id))
             self.garbage_collects[dst_id].start()

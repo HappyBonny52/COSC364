@@ -1,0 +1,3 @@
+router-id 3
+input-ports 3014, 3915
+outputs 2023-2-2, 1031-4-1
