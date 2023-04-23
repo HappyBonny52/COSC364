@@ -59,7 +59,8 @@ class Config:
 
     def __isOutputValid(self, value, inputs):
         is_output_wrong = False
-        outputs, costs, peers, wrong_outputs, wrong_costs, wrong_peers, duplicated_peer = [], [], [], [], [], [], []
+        outputs, costs, peers, wrong_outputs = [], [], [], []
+        wrong_costs, wrong_peers, duplicated_peer = [], [], []
         
         for line in value:
             if len(line.split("-"))!=3 or '' in line.split("-"):
