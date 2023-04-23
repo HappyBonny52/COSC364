@@ -1,9 +1,10 @@
 import sys
 import select
 import socket
+import threading
 import random as rand
 from threading import Timer, Lock
-import threading
+
 
 RECV_BUFFSIZE = 1024 
 
