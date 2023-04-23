@@ -408,7 +408,7 @@ class Demon:
                 is_valid = False
                 print(f"Packet Invalid [Rip entry {i}] : Wrong value for destination router id")
             if not (0 <= metric <= 15):
-                if  metric > 15:
+                if  metric == 16:
                     # send this entry to garbage_collection for generating poison
                     self.timer_garbage_collection(dest_id) 
                 else:
@@ -472,8 +472,8 @@ class Demon:
     #_____Update and entry process_______________________________________________________________________________________
 
     def update_periodic(self):
-
-        period = round(rand.uniform(0.8*self.timers['periodic'],1.2*self.timers['periodic']), 2) #Generates random float between [0.8*periodic time, 1.2*periodic time] and rounds to 2dp
+         #Generates random float between [0.8*periodic time, 1.2*periodic time] and rounds to 2dp
+        period = round(rand.uniform(0.8*self.timers['periodic'],1.2*self.timers['periodic']), 2)
         threading.Timer(period, self.update_periodic).start()
 
         print(f"Periodic Update : Sending packet ...... ")
@@ -481,7 +481,6 @@ class Demon:
                        
     def entry_update(self, new_entry, receive_from):
         link_cost = self.router.neighbor[receive_from]['cost']
-        better_path = False
 
         for new_dst in new_entry:
             new_metric = new_entry[new_dst]['metric'] + link_cost
@@ -496,7 +495,6 @@ class Demon:
                 self.route_change_flags[new_dst] = False
                 if (new_metric < self.cur_table[new_dst]['metric']) and new_metric <=15:
                     if self.timer_status[new_dst] != "TIMED_OUT":
-                        better_path = True
                         self.route_change_flags[new_dst] = True
                         print(f"******NOTICE : BETTER ROUTE FOUND FOR ROUTER******")
                         print(f"ROUTE {new_dst} : cost reduced from {self.cur_table[new_dst]['metric']} to {new_metric}")
@@ -504,10 +502,6 @@ class Demon:
                                     
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
         self.entry_unreachable(receive_from)
-
-        if better_path :
-            print("TRIGGERED UPDATE : Due to better path detection!")
-            self.send_packet()
 
         print(f"----Updated Table--------")
         self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
