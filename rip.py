@@ -451,6 +451,8 @@ class Demon:
                             self.entry_timeout(reachable)
                             self.tick = 0
                 print(f"Route for reaching * ROUTER {dst_id} * crashed!")
+                self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
+                print("Triggerd update : Due to unreachable route detection!")
                 self.send_packet()
                 self.garbage_collects[dst_id] = Timer(self.timers['garbage-collection'], lambda: self.entry_remove(dst_id))
                 self.garbage_collects[dst_id].start()
@@ -499,7 +501,7 @@ class Demon:
         self.entry_unreachable(receive_from)
 
         if better_path :
-            print("Triggered update : Send packets due to the route change")
+            print("Triggered update : Due to better path detection!")
             self.send_packet()
         print(f"----Updated Table--------")
         self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
@@ -507,14 +509,16 @@ class Demon:
     def entry_unreachable(self, receive_from):
         """Remove entries containing unreachable route with metric more than 16"""
         self.tick += 1
-        if self.tick >=self.timers['garbage-collection']+2:
+        if self.tick >=self.timers['garbage-collection']:
             for dst in self.cur_table.copy():
-                if self.timer_status[dst] == "TIMED_OUT" and dst != self.router.rtr_id and not self.garbage_collects.get(dst, None):
+                if self.timer_status[dst] == "TIMED_OUT" and dst != self.router.rtr_id and self.cur_table[dst]['next-hop'] not in self.cur_table:
                     print(f"Route to {dst} via {receive_from} is unreachable")
                     self.cur_table.pop(dst) 
-                    self.tick = 0
+            self.tick = 0
             
         for dst in self.cur_table.copy():
+            if self.timer_status[dst] == "TIMED_OUT":
+                self.route_change_flags[dst] = True
             if self.timer_status[dst] != "TIMED_OUT" and self.cur_table[dst]['metric']>15 and dst != self.router.rtr_id:
                 print(f"Route to {dst} via {receive_from} is unreachable")
                 self.cur_table.pop(dst) 
@@ -523,10 +527,9 @@ class Demon:
         self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
 
     def entry_timeout(self, dst_id):
-        if dst_id in self.cur_table:
-            self.cur_table[dst_id]['metric'] = 16
-            self.timer_status[dst_id]= "TIMED_OUT"
-            self.route_change_flags[dst_id] = True 
+        self.cur_table[dst_id]['metric'] = 16
+        self.timer_status[dst_id]= "TIMED_OUT"
+        self.route_change_flags[dst_id] = True 
 
     def entry_remove(self, dst_id):
         if self.garbage_collects.get(dst_id, None):
