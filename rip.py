@@ -10,8 +10,9 @@ RECV_BUFFSIZE = 1024
 
 #___Class Config_____________________________________________________________________________________________________________________ 
 class Config:
-    """Config object initialised with argument string that is the string representation
-    of the config filepath for <obj> as initialised object name and <param> as the paramter in correct format
+    """Config object initialised with argument string that is 
+    the string representation of the config filepath for <obj> 
+    as initialised object name and <param> as the paramter in correct format
     each parameter's value can be accessed by <obj>.params["<param>"] and will give
     a list of string representation of the value/s """
     def __init__(self, path):
@@ -141,10 +142,6 @@ class Config:
             
         
     def detailed_config_check(self):
-        """
-        Function to unpack config parameters and stores them in their representative variables
-        DOES NOT return anything. The values are stored as attributes of this class
-        """
         config_file = open(self.path, "r")
         config = config_file.read().split('\n')
         config_file.close()
@@ -275,7 +272,7 @@ class Demon:
         afi = 0 #afi = address family identifier
         must_be_zero = 0
         dest = list(entry)
-        for i in range(len(entry)): #the item in range() will be replaced by lists of list entry contents
+        for i in range(len(entry)):
             #first 32 bits of rip entry
             rip_entry += afi.to_bytes(2, 'big')
             rip_entry += must_be_zero.to_bytes(2, 'big')
@@ -323,7 +320,7 @@ class Demon:
             else:
                 #split_horizon
                 if (self.cur_table[dest]['next-hop'] != peer_rtr and dest != peer_rtr) :
-                    #filter entry with not known information to peer router
+                    #filter entry with known information to peer router
                     filtered[dest] = self.cur_table[dest]
         return self.rip_response_packet(self.compose_rip_entry(filtered))
    
@@ -333,7 +330,8 @@ class Demon:
                 for i in range(len(peer)):
                     port = list(peer.values())[i]['output']
                     peer_rtr = list(peer)[i]
-                    customized_pkt = self.split_horizon_with_poison_reverse(peer_rtr, port) #customized_packet for each output
+                    #customized_packet for each output
+                    customized_pkt = self.split_horizon_with_poison_reverse(peer_rtr, port)
                     sending_socket.sendto(customized_pkt, ('127.0.0.1', port)) 
 
     def receive_packet(self):
@@ -349,7 +347,8 @@ class Demon:
                         checked_packet = self.is_packet_valid(resp_pkt, receive_from)
                         if  checked_packet:
                             self.response_pkt = resp_pkt
-                            #print(f"----Received entries-----\n{checked_packet}") #comment this line out to see received Packet
+                            #print(f"----Received entries-----\n{checked_packet}") 
+                            #comment out the line above to see received Packet
                             self.entry_update(checked_packet, receive_from)
                         else:
                             print(f"Received packet from router {receive_from} failed validity check!")
@@ -368,12 +367,12 @@ class Demon:
     def is_packet_valid(self, packet, receive_from):
         """Check if the received packet is valid return packet contents if True else return False """
         entry = {}
-        command = int.from_bytes(packet[0:1], "big") #command should be 2
-        version = int.from_bytes(packet[1:2], "big") #version should be 2
-        rtr_id_as_ip_addr = int.from_bytes(packet[2:4], "big") #This should be in range of 1024 <= x <= 64000
+        command = int.from_bytes(packet[0:1], "big")
+        version = int.from_bytes(packet[1:2], "big") 
+        rtr_id_as_ip_addr = int.from_bytes(packet[2:4], "big") 
         is_valid = True
-
-        if len(packet)%4 != 0 or not (24<=len(packet)<=504): #When Packet Size is wrong
+        #When Packet Size is wrong
+        if len(packet)%4 != 0 or not (24<=len(packet)<=504): 
             is_valid = False
             print("Packet Invalid : Packet Size is wrong")
             if len(packet)<20:
@@ -384,31 +383,35 @@ class Demon:
                 print("Rip entries can be contained at most 25\n")
             return False
 
-        if command != 2:
+        if command != 2: #command should be 2
             is_valid = False
             print("Packet Invalid [Common Header] : Wrong value for command")
-        if  version != 2:
+        if  version != 2: #version should be 2
             is_valid = False
             print("Packet Invalid [Common Header] : Wrong value for version")
-        if not (1 <= rtr_id_as_ip_addr <= 64000) :
+        if not (1 <= rtr_id_as_ip_addr <= 64000) :#This should be in range of 1 <= x <= 64000
             is_valid = False
             print("Packet Invalid [Common Header] : Wrong value for router id")
 
         for i in range((len(packet)-4)// 20):
-            afi = (int.from_bytes(packet[4+20*i:6+20*i], "big"))#afi should be 0
-            must_be_zeros = ( int.from_bytes(packet[6+20*i:8+20*i], "big") +  int.from_bytes(packet[12+20*i:20+20*i], "big") ) 
-            dest_id = int.from_bytes(packet[(8+20*i):(12+20*i)], "big")#This should be in range of 1024 <= x <= 64000
-            metric= int.from_bytes(packet[(20+20*i):(24+20*i)], "big") #This should be in range of 0 <= x <= 16
-            if afi != 0:
+            afi = (int.from_bytes(packet[4+20*i:6+20*i], "big"))
+            must_be_zeros = int.from_bytes(packet[6+20*i:8+20*i], "big") 
+            must_be_zeros += int.from_bytes(packet[12+20*i:20+20*i], "big")
+            dest_id = int.from_bytes(packet[(8+20*i):(12+20*i)], "big")
+            metric= int.from_bytes(packet[(20+20*i):(24+20*i)], "big") 
+            if afi != 0: #afi should be 0
                 is_valid = False
                 print(f"Packet Invalid [Rip entry {i}] : Wrong value for address family identifier")
-            if must_be_zeros != 0 :
+            if must_be_zeros != 0 : 
                 is_valid = False
                 print(f"Packet Invalid [Rip entry {i}] : Wrong value for must_be_zero field")
-            if not (1 <= dest_id <= 64000):
+            if not (1 <= dest_id <= 64000): #This should be in range of 1 <= x <= 64000
                 is_valid = False
                 print(f"Packet Invalid [Rip entry {i}] : Wrong value for destination router id")
-            if not (0 <= metric <= 15):
+            #metric should be between 1 to 16 
+            #but before calculating new metric for connected peer router,
+            #peer can send entry itself with metric 0
+            if not (0 <= metric <= 15): 
                 if  metric == 16:
                     # send this entry to garbage_collection for generating poison
                     self.timer_garbage_collection(dest_id) 
@@ -427,7 +430,7 @@ class Demon:
 
         except KeyboardInterrupt:
             print('Keyboard Interrupted!')
-        sys.exit(1)
+            sys.exit(1)
 
     #_____Timer Event_______________________________________________________________________________________
 
@@ -443,7 +446,8 @@ class Demon:
             self.timeouts[dst_id].start()
 
     def timer_garbage_collection(self, dst_id):
-        """Used for adding a Timer thread object that will eventually call entry_remove(dst_id) for a given dst_id"""
+        """Used for adding a Timer thread object that will 
+        eventually call entry_remove(dst_id) for a given dst_id"""
         if self.timeouts.get(dst_id, None):
             self.timeouts[dst_id].cancel()
             del self.timeouts[dst_id]
@@ -464,7 +468,8 @@ class Demon:
                 self.garbage_collects[dst_id].start()
 
     def timer_remove_garbage_collection(self, dst_id):
-        """Used for removing the Timer thread object that will eventually call entry_remove(dst_id) for a given dst_id"""
+        """Used for removing the Timer thread object that will 
+        eventually call entry_remove(dst_id) for a given dst_id"""
         if self.garbage_collects.get(dst_id, None) :
             self.garbage_collects[dst_id].cancel()
             self.timer_status[dst_id] = "         "
@@ -485,21 +490,21 @@ class Demon:
 
         for new_dst in new_entry:
             new_metric = new_entry[new_dst]['metric'] + link_cost
-            if (new_dst not in self.cur_table): # if new_dst not in current_table
-                if new_entry[new_dst]['metric'] <= 15:
+            if new_metric <=15:
+                if (new_dst not in self.cur_table): # if new_dst not in current_table
                     self.route_change_flags[new_dst] = True
                     self.timer_status[new_dst] = '         '
                     print(f"******NOTICE : NEW ROUTE FOUND : ROUTER {new_dst} IS REACHABLE******" )
                     self.cur_table = self.router.add_entry(self.cur_table, new_dst, receive_from, new_metric)
 
-            else : # if new_dst in current_table      
-                self.route_change_flags[new_dst] = False
-                if (new_metric < self.cur_table[new_dst]['metric']) and new_metric <=15:
-                    if self.timer_status[new_dst] != "TIMED_OUT":
-                        self.route_change_flags[new_dst] = True
-                        print(f"******NOTICE : BETTER ROUTE FOUND FOR ROUTER******")
-                        print(f"ROUTE {new_dst} : cost reduced from {self.cur_table[new_dst]['metric']} to {new_metric}")
-                        self.cur_table = self.router.modify_entry(self.cur_table, new_dst, receive_from, new_metric)           
+                else : # if new_dst in current_table      
+                    self.route_change_flags[new_dst] = False
+                    if (new_metric < self.cur_table[new_dst]['metric']):
+                        if self.timer_status[new_dst] != "TIMED_OUT":
+                            self.route_change_flags[new_dst] = True
+                            print(f"******NOTICE : BETTER ROUTE FOUND FOR ROUTER******")
+                            print(f"ROUTE {new_dst} : cost reduced from {self.cur_table[new_dst]['metric']} to {new_metric}")
+                            self.cur_table = self.router.modify_entry(self.cur_table, new_dst, receive_from, new_metric)           
                                     
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
         self.entry_unreachable(receive_from)
@@ -513,17 +518,19 @@ class Demon:
         if self.tick >=self.timers['garbage-collection']:
             for dst in self.cur_table.copy():
                 if dst != self.router.rtr_id:
-                    if self.timer_status[dst] == "TIMED_OUT" and self.cur_table[dst]['next-hop'] not in self.cur_table:
-                        print(f"Route to {dst} via {receive_from} is unreachable")
-                        self.cur_table.pop(dst) 
+                    if self.timer_status[dst] == "TIMED_OUT" :
+                        if self.cur_table[dst]['next-hop'] not in self.cur_table:
+                            print(f"Route to {dst} via {receive_from} is unreachable")
+                            self.cur_table.pop(dst) 
             self.tick = 0
             
         for dst in self.cur_table.copy():
             if self.timer_status[dst] == "TIMED_OUT":
                 self.route_change_flags[dst] = True
-            if self.timer_status[dst] != "TIMED_OUT" and self.cur_table[dst]['metric']>15 and dst != self.router.rtr_id:
-                print(f"Route to {dst} via {receive_from} is unreachable")
-                self.cur_table.pop(dst) 
+            if self.timer_status[dst] != "TIMED_OUT" and self.cur_table[dst]['metric']>15:
+                if dst != self.router.rtr_id:
+                    print(f"Route to {dst} via {receive_from} is unreachable")
+                    self.cur_table.pop(dst) 
         
                
         self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
