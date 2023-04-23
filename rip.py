@@ -38,11 +38,11 @@ class Config:
                                                        self.params['outputs'],
                                                        self.params['timers'],)
     def __isMetricValid(self, metric):
-        """ Checks if metric is in range of 1 <= metric <= 16
-         The metric field contains a value between 1 and 15 (inclusive) which
-         specifies the current metric for the destination; or the value 16
-         (infinity), which indicates that the destination is not reachable. 
-         ----Referred from RFC 2453 - rip version 2"""
+        """ Checks if metric is in range of 1 <= metric <= 16"""
+         #The metric field contains a value between 1 and 15 (inclusive) which
+         #specifies the current metric for the destination; or the value 16
+         #(infinity), which indicates that the destination is not reachable. 
+         #----Referred from RFC 2453 - rip version 2
         return False if not (1<=metric<=16) else True
 
     def __isPortValid(self, port):
@@ -60,36 +60,82 @@ class Config:
         outputs, costs, peers, wrong_outputs, wrong_costs, wrong_peers = [], [], [], [], [], []
         
         for line in value:
-            output, cost, peer = int(line.split("-")[0]), int(line.split("-")[1]), int(line.split("-")[2])
-            outputs.append(output) 
-            if not self.__isPortValid(output):
-                is_output_wrong = True
-                wrong_outputs.append(output)
-            costs.append(cost)
-            if not self.__isMetricValid(cost):
-                is_output_wrong = True
-                wrong_costs.append(cost)
-            peers.append(peer)
-            if not self.__isRouterIdValid(peer):
-                is_output_wrong = True
-                wrong_peers.append(peer)
+            if len(line.split("-"))!=3 or '' in line.split("-"):
+                print("ERROR : ONE OF VALUES IS MISSING IN OUTPUTS")
+                print("FILL OUT MISSING VALUES FIRST TO READ CONFIG FILE")
+                print("UNABLE TO READ CONFIG")
+                return sys.exit(1)
+            else:
+                output, cost, peer = int(line.split("-")[0]), int(line.split("-")[1]), int(line.split("-")[2])
+                outputs.append(output) 
+                if not self.__isPortValid(output):
+                    is_output_wrong = True
+                    wrong_outputs.append(output)
+                costs.append(cost)
+                if not self.__isMetricValid(cost):
+                    is_output_wrong = True
+                    wrong_costs.append(cost)
+                peers.append(peer)
+                if not self.__isRouterIdValid(peer):
+                    is_output_wrong = True
+                    wrong_peers.append(peer)
 
         #check if output port is not valid as there's an existing inputs with the same port number
         is_duplicated = [output for output in outputs if output in inputs]
         if len(is_duplicated) != 0:
             is_output_wrong = True
-            print("ERROR : OUTPUT_PORT is DUPLICATED with INPUT_PORT. Duplicated Value : {} ".format(is_duplicated))
+            print("ERROR : OUTPUT_PORT is duplicated\n\tExisting INPUT_PORT : {} ".format(is_duplicated))
         if len(wrong_outputs) != 0:
             all_wrong_outputs = set(is_duplicated+wrong_outputs)
-            print("ERROR : OUTPUT_PORT in Outputs INVALID. Wrong Values : {} ".format(list(all_wrong_outputs)))
+            print("ERROR : OUTPUT_PORT invalid\n\tWrong OUTPUT : {} ".format(list(all_wrong_outputs)))
         if len(wrong_costs) != 0:
-            print("ERROR : METRIC in Outputs INVALID. Wrong Value : {} ".format(wrong_costs))
+            print("ERROR : METRIC invalid\n\tWrong METRIC : {} ".format(wrong_costs))
         if len(wrong_peers) != 0:
-            print("ERROR : PEER_ROUTER_ID in Outputs INVALID. Wrong Value : {} ".format(wrong_peers))
+            print("ERROR : PEER_ROUTER_ID invalid\n\tWrong PEER_ROUTER_ID : {} ".format(wrong_peers))
         return is_output_wrong
 
+    def _is_missing_value(self, config):
+        is_missing = False
+        for line in config:
+            if line.split(' ', 1)[0] in self.params: 
+                param = line.split(' ', 1)[0]
+                value = line.split(' ', 1)[1].replace(' ', '').split(',')
+                self.params[param] = value
+
+        for param in self.params:
+            try:
+                if param == 'router-id':
+                    if  self.params[param] == ['']:
+                        print(f"MISSING PARAMETER {param.upper()}")
+                        is_missing = True
+                        raise ValueError
+                    if len(self.params[param]) > 1:
+                        print(f"ERROR : ROUTER ID IS NOT UNIQUE")
+                        is_missing = True
+                        raise ValueError
+                if param == 'input-ports':
+                    if len(self.params[param]) == [''] :
+                        is_missing = True
+                        raise ValueError
+                if param == 'outputs':
+                    if len(self.params[param]) == [''] :
+                        is_missing = True
+                        raise ValueError
+                if len(self.params['outputs']) != len(self.params['input-ports']):
+                    print(f"ERROR : The number of outputs and input-ports are not matched")
+                    print("\tThe number of ports should be matched!")
+                    is_missing = True
+                    raise ValueError
+                        
+            except(ValueError):
+                print("ERROR : UNABLE TO READ CONFIG")
+                print("FILL OUT MISSING VALUES FIRST TO READ CONFIG FILE")
+                sys.exit(1)
+        return is_missing
+
+            
         
-    def unpack(self):
+    def detailed_config_check(self):
         """
         Function to unpack config parameters and stores them in their representative variables
         DOES NOT return anything. The values are stored as attributes of this class
@@ -97,57 +143,30 @@ class Config:
         config_file = open(self.path, "r")
         config = config_file.read().split('\n')
         config_file.close()
-        is_output_wrong = False
-        is_packet_valid = False
 
-        for line in config:
-            #checks if line is even worth further parsing ie. is a parameter line
-            if line.split(' ', 1)[0] in self.params:   
-                #parses the line, param is a string and value is a list of strings
-                param = line.split(' ', 1)[0]
-                value = line.split(' ', 1)[1].replace(' ', '').split(',')
-                try:
-                    if param == "router-id":
-                        if not self.__isRouterIdValid(int(value[0])):
-                            #router-id is out of range
-                            raise ValueError
-                except(ValueError):
-                    is_packet_valid = True
-                    print("ERROR : PARAMETER <{}> INVALID. Wrong Value : {} ".format(param, int(value[0])))
-                else:
-                    try:
-                        if param == "input-ports":
-                            self.given_inputs = [int(port) for port in value]
-                            wrong_inputs = [int(port) for port in value if not self.__isPortValid(int(port))]
-                            if len(wrong_inputs) != 0:
-                                raise ValueError
-                    except(ValueError):
-                        is_packet_valid = True
-                        print("ERROR : PARAMETER <{}> INVALID. Wrong Value : {} ".format(param, wrong_inputs))
-                    else:
-                        try:
-                            if param == "outputs":
-                                is_output_invalid = self.__isOutputValid(value, self.given_inputs)
-                                if is_output_invalid:
-                                    raise ValueError
-                        except(ValueError):
-                            is_packet_valid = True
-                            print("ERROR : PARAMETER <{}> CONTAINS INVALID VALUE".format(param))
-                        else:
-                            #inserts the value in config file as the value for params dict for given key: param
-                            self.params[param] = value
-                    
-        #checks for missing required parameters by finding if any of the required fields are still None
-        for param in self.params:
-            try:
-                if self.params[param] == None and param not in self.__req_params:
-                    raise TypeError
-            except(TypeError):
-                is_packet_valid = True
-                if param != 'timers':
-                    print("CONFIG VALIDITY CHECK FAILED ! <{}> is MISSING or not VALID! ".format(param))
-        if is_packet_valid :
+        is_packet_valid = True
+        if not self._is_missing_value(config):
+            print("WHat is rtr id", self.params['outputs'])
+            if not self.__isRouterIdValid(int(self.params["router-id"][0])):
+                is_packet_valid = False
+                print("ERROR : ['ROUTER-ID'] invalid\n\tWrong ROUTER_ID : {}".format(self.params['router-id']))
+            
+            wrong_inputs = [int(port) for port in self.params['input-ports'] if not self.__isPortValid(int(port))]
+            if len(wrong_inputs) != 0:
+                is_packet_valid = False
+                print(f"ERROR : ['INPUT-PORTS'] invalid\n\tWrong INPUT_PORT : {wrong_inputs} ")
+
+            is_output_invalid = self.__isOutputValid(self.params['outputs'], self.params['input-ports'])
+            if is_output_invalid:
+                is_packet_valid = False
+                print("ERROR : ['OUTPUTS'] contain invalid values")
+
+            if not is_packet_valid :
+                print("ERROR : UNABLE TO READ CONFIG")
+                sys.exit(1)
+        else:
             sys.exit(1)
+        
 
 #___Class Router_____________________________________________________________________________________________________________________ 
 
@@ -155,8 +174,8 @@ class Router:
     """For this router to have its own information based on config file"""
     def __init__(self,  rtrId, inputs, outputs):
         
-        self.rtr_id = rtrId # of type int
-        self.inputs = inputs # list of input ports
+        self.rtr_id = int(rtrId) # of type int
+        self.inputs = [int(input_port) for input_port in inputs] # list of input ports
         self.neighbor = self.decompose_output(outputs) # dictionary of peer routers
         #neighbor contains corresponding output port and link cost info)
     
@@ -527,7 +546,7 @@ class Demon:
 
 if __name__ == "__main__":
     config = Config(sys.argv[1])
-    config.unpack()
+    config.detailed_config_check()
     print(config)
     
     router = Router(int(config.params['router-id'][0]), config.params['input-ports'], config.params['outputs'])

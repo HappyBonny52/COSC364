@@ -1,0 +1,3 @@
+router-id 
+input-ports 50000, 2999
+outputs 3000-8-1, 700000000-26-3
