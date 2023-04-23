@@ -37,7 +37,14 @@ class Config:
                                                        self.params['input-ports'],
                                                        self.params['outputs'],
                                                        self.params['timers'],)
-        
+    def __isMetricValid(self, metric):
+        """ Checks if metric is in range of 1 <= metric <= 16
+         The metric field contains a value between 1 and 15 (inclusive) which
+         specifies the current metric for the destination; or the value 16
+         (infinity), which indicates that the destination is not reachable. 
+         ----Referred from RFC 2453 - rip version 2"""
+        return False if not (1<=metric<=16) else True
+
     def __isPortValid(self, port):
         """Checks if port is in range of 1024 <= port <= 64000
         returns True if in range and False otherwise"""
@@ -57,7 +64,7 @@ class Config:
         config = config_file.read().split('\n')
         config_file.close()
         is_wrong_value = False
-         
+
         for line in config:
             #checks if line is even worth further parsing ie. is a parameter line
             if line.split(' ', 1)[0] in self.params:   
@@ -65,51 +72,50 @@ class Config:
                 param = line.split(' ', 1)[0]
                 value = line.split(' ', 1)[1].replace(' ', '').split(',')
                 try:
-                    #error handles
-                    if not value:
-                        #no value
-                        raise IndexError
-                except(IndexError):
+                    if param == "router-id":
+                        if not self.__isRouterIdValid(int(value[0])):
+                            #router-id is out of range
+                            raise ValueError
+                except(ValueError):
                     is_wrong_value = True
-                    print("PARAMETER <{}> MISSING VALUES. PLEASE CHECK CONFIG".format(param))
+                    print("PARAMETER <{}> INVALID VALUE. Wrong Given Value : {} ".format(param, int(value[0])))
                 else:
                     try:
-                        if param == "router-id":
-                            if not self.__isRouterIdValid(int(value[0])):
-                                #router-id is out of range
+                        if param == "input-ports":
+                            given_inputs = [int(port) for port in value]
+                            wrong_inputs = [int(port) for port in value if not self.__isPortValid(int(port))]
+                            if len(wrong_inputs) != 0:
                                 raise ValueError
                     except(ValueError):
                         is_wrong_value = True
-                        print("PARAMETER <{}> INVALID VALUE. PLEASE CHECK CONFIG".format(param))
-
+                        print("PARAMETER <{}> INVALID VALUE. Wrong Given Value : {} ".format(param, wrong_inputs))
                     else:
                         try:
-                            if param == "input-ports":
-                                for port in value:
-                                    if not self.__isPortValid(int(port)):
-                                        #input-ports is out of range
+                            if param == "outputs":
+                                given_outputs = [int(line.split("-")[0]) for line in value]
+                                given_costs = [int(line.split("-")[1]) for line in value]
+                                given_peers = [int(line.split("-")[2]) for line in value]
+
+                                wrong_outputs = [int(line.split("-")[2]) for line in value if not self.__isPortValid(int(line.split("-")[2]))]
+                                wrong_costs = [int(line.split("-")[2]) for line in value if not self.]
+                                wrong_peers = [int(line.split("-")[2]) for line in value]
+                                print("given_outputs!", given_outputs)
+                                print("given_cost", given_costs)
+                                print("given_peers", given_peers)
+                                for output in value:
+                                    parsed = output.split("-")
+                                    if not self.__isRouterIdValid(int(parsed[2])):
+                                        #output router id is out of range
+                                        raise ValueError
+                                    if not self.__isPortValid(int(parsed[0])):
+                                        #output port is out of range
                                         raise ValueError
                         except(ValueError):
                             is_wrong_value = True
-                            print("PARAMETER <{}> INVALID VALUE. PLEASE CHECK CONFIG".format(param))
+                            print("PARAMETER <{}> INVALID VALUE. Wrong Given Value : {} ".format(param, int(parsed[0])))
                         else:
-                            try:
-                                if param == "outputs":
-                                    for output in value:
-                                        parsed = output.split("-")
-                                        if not self.__isRouterIdValid(int(parsed[2])):
-                                            #output router id is out of range
-                                            raise ValueError
-                                        if not self.__isPortValid(int(parsed[0])):
-                                            #output port is out of range
-                                            raise ValueError
-                            except(ValueError):
-                                is_wrong_value = True
-                                print("PARAMETER <{}> INVALID VALUE. PLEASE CHECK CONFIG".format(param))
-                            else:
-
-                                #inserts the value in config file as the value for params dict for given key: param
-                                self.params[param] = value
+                            #inserts the value in config file as the value for params dict for given key: param
+                            self.params[param] = value
                     
         #checks for missing required parameters by finding if any of the required fields are still None
         for param in self.params:
@@ -300,6 +306,7 @@ class Demon:
                         checked_packet = self.is_packet_valid(resp_pkt, receive_from)
                         if  checked_packet:
                             self.response_pkt = resp_pkt
+                            print(f"----Received entries-----\n{checked_packet}")
                             self.entry_update(checked_packet, receive_from)
                         else:
                             print(f"Received packet from router {receive_from} failed validity check!")
