@@ -86,7 +86,7 @@ class Config:
         is_duplicated = [output for output in outputs if output in inputs]
         if len(is_duplicated) != 0:
             is_output_wrong = True
-            print("ERROR : OUTPUT_PORT is duplicated\n\tExisting INPUT_PORT : {} ".format(is_duplicated))
+            print("ERROR : OUTPUT_PORT is duplicated\n\tExisting PORT_NUMBER : {} ".format(is_duplicated))
         if len(wrong_outputs) != 0:
             all_wrong_outputs = set(is_duplicated+wrong_outputs)
             print("ERROR : OUTPUT_PORT invalid\n\tWrong OUTPUT : {} ".format(list(all_wrong_outputs)))
@@ -119,10 +119,12 @@ class Config:
                         raise ValueError
                 if param == 'input-ports':
                     if len(self.params[param]) == [''] :
+                        print(f"MISSING PARAMETER {param.upper()}")
                         is_missing = True
                         raise ValueError
                 if param == 'outputs':
                     if len(self.params[param]) == [''] :
+                        print(f"MISSING PARAMETER {param.upper()}")
                         is_missing = True
                         raise ValueError
                 if len(self.params['outputs']) != len(self.params['input-ports']):
@@ -346,7 +348,7 @@ class Demon:
                         checked_packet = self.is_packet_valid(resp_pkt, receive_from)
                         if  checked_packet:
                             self.response_pkt = resp_pkt
-                            #print(f"----Received entries-----\n{checked_packet}")
+                            #print(f"----Received entries-----\n{checked_packet}") #comment this line out to see received Packet
                             self.entry_update(checked_packet, receive_from)
                         else:
                             print(f"Received packet from router {receive_from} failed validity check!")
@@ -370,7 +372,7 @@ class Demon:
         rtr_id_as_ip_addr = int.from_bytes(packet[2:4], "big") #This should be in range of 1024 <= x <= 64000
         is_valid = True
 
-        if len(packet)%4!= 0 or not (24<=len(packet)<=504): #When Packet Size is wrong
+        if len(packet)%4 != 0 or not (24<=len(packet)<=504): #When Packet Size is wrong
             is_valid = False
             print("Packet Invalid : Packet Size is wrong")
             if len(packet)<20:
@@ -380,6 +382,7 @@ class Demon:
                 print("Error : Packet Size is too Big")
                 print("Rip entries can be contained at most 25\n")
             return False
+
         if command != 2:
             is_valid = False
             print("Packet Invalid [Common Header] : Wrong value for command")
@@ -394,7 +397,7 @@ class Demon:
             afi = (int.from_bytes(packet[4+20*i:6+20*i], "big"))#afi should be 0
             must_be_zeros = ( int.from_bytes(packet[6+20*i:8+20*i], "big") +  int.from_bytes(packet[12+20*i:20+20*i], "big") ) 
             dest_id = int.from_bytes(packet[(8+20*i):(12+20*i)], "big")#This should be in range of 1024 <= x <= 64000
-            metric= int.from_bytes(packet[(20+20*i):(24+20*i)], "big") #This should be in range of 0 <= x <= 15
+            metric= int.from_bytes(packet[(20+20*i):(24+20*i)], "big") #This should be in range of 0 <= x <= 16
             if afi != 0:
                 is_valid = False
                 print(f"Packet Invalid [Rip entry {i}] : Wrong value for address family identifier")
@@ -405,8 +408,9 @@ class Demon:
                 is_valid = False
                 print(f"Packet Invalid [Rip entry {i}] : Wrong value for destination router id")
             if not (0 <= metric <= 15):
-                if 20 > metric > 15:
-                    self.timer_garbage_collection(dest_id)
+                if  metric > 15:
+                    # send this entry to garbage_collection for generating poison
+                    self.timer_garbage_collection(dest_id) 
                 else:
                     flag = False
                     print(f"Packet Invalid [Rip entry {i}] : Wrong value for metric")
@@ -453,7 +457,7 @@ class Demon:
                             self.tick = 0
                 print(f"Route for reaching * ROUTER {dst_id} * crashed!")
                 self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
-                print("Triggerd update : Due to unreachable route detection!")
+                print("TRIGGERED UPDATE : Due to unreachable route detection!")
                 self.send_packet()
                 self.garbage_collects[dst_id] = Timer(self.timers['garbage-collection'], lambda: self.entry_remove(dst_id))
                 self.garbage_collects[dst_id].start()
@@ -502,8 +506,9 @@ class Demon:
         self.entry_unreachable(receive_from)
 
         if better_path :
-            print("Triggered update : Due to better path detection!")
+            print("TRIGGERED UPDATE : Due to better path detection!")
             self.send_packet()
+
         print(f"----Updated Table--------")
         self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
     
@@ -512,9 +517,10 @@ class Demon:
         self.tick += 1
         if self.tick >=self.timers['garbage-collection']:
             for dst in self.cur_table.copy():
-                if self.timer_status[dst] == "TIMED_OUT" and dst != self.router.rtr_id and self.cur_table[dst]['next-hop'] not in self.cur_table:
-                    print(f"Route to {dst} via {receive_from} is unreachable")
-                    self.cur_table.pop(dst) 
+                if dst != self.router.rtr_id:
+                    if self.timer_status[dst] == "TIMED_OUT" and self.cur_table[dst]['next-hop'] not in self.cur_table:
+                        print(f"Route to {dst} via {receive_from} is unreachable")
+                        self.cur_table.pop(dst) 
             self.tick = 0
             
         for dst in self.cur_table.copy():
@@ -528,9 +534,10 @@ class Demon:
         self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
 
     def entry_timeout(self, dst_id):
-        self.cur_table[dst_id]['metric'] = 16
-        self.timer_status[dst_id]= "TIMED_OUT"
-        self.route_change_flags[dst_id] = True 
+        if dst_id in self.cur_table :
+            self.cur_table[dst_id]['metric'] = 16
+            self.timer_status[dst_id]= "TIMED_OUT"
+            self.route_change_flags[dst_id] = True 
 
     def entry_remove(self, dst_id):
         if self.garbage_collects.get(dst_id, None):
