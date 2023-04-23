@@ -56,59 +56,72 @@ class Config:
         config_file = open(self.path, "r")
         config = config_file.read().split('\n')
         config_file.close()
+        is_wrong_value = False
          
         for line in config:
             #checks if line is even worth further parsing ie. is a parameter line
             if line.split(' ', 1)[0] in self.params:   
+                #parses the line, param is a string and value is a list of strings
+                param = line.split(' ', 1)[0]
+                value = line.split(' ', 1)[1].replace(' ', '').split(',')
                 try:
-                    #parses the line, param is a string and value is a list of strings
-                    param = line.split(' ', 1)[0]
-                    value = line.split(' ', 1)[1].replace(' ', '').split(',')
-                    
                     #error handles
                     if not value:
                         #no value
                         raise IndexError
-                    
-                    if param == "router-id":
-                        if not self.__isRouterIdValid(int(value[0])):
-                            #router-id is out of range
-                            raise ValueError
-                    
-                    elif param == "input-ports":
-                        for port in value:
-                            if not self.__isPortValid(int(port)):
-                                #input-ports is out of range
-                                raise ValueError
-                            
-                    elif param == "outputs":
-                        for output in value:
-                            parsed = output.split("-")
-                            if not self.__isRouterIdValid(int(parsed[2])):
-                                #output router id is out of range
-                                raise ValueError
-                            if not self.__isPortValid(int(parsed[0])):
-                                #output port is out of range
-                                raise ValueError
-                        
-                    #inserts the value in config file as the value for params dict for given key: param
-                    self.params[param] = value
-                    
                 except(IndexError):
+                    is_wrong_value = True
                     print("PARAMETER <{}> MISSING VALUES. PLEASE CHECK CONFIG".format(param))
-                    sys.exit(1)
-                except(ValueError):
-                    print("PARAMETER <{}> INVALID VALUE. PLEASE CHECK CONFIG".format(param))
-                    sys.exit(1)
-                except:
-                    #Uncatched error. Debug code if you see this prompted!!!
-                    print("--FATAL INTERNAL ERROR--")
-                    sys.exit(1)
+                else:
+                    try:
+                        if param == "router-id":
+                            if not self.__isRouterIdValid(int(value[0])):
+                                #router-id is out of range
+                                raise ValueError
+                    except(ValueError):
+                        is_wrong_value = True
+                        print("PARAMETER <{}> INVALID VALUE. PLEASE CHECK CONFIG".format(param))
+
+                    else:
+                        try:
+                            if param == "input-ports":
+                                for port in value:
+                                    if not self.__isPortValid(int(port)):
+                                        #input-ports is out of range
+                                        raise ValueError
+                        except(ValueError):
+                            is_wrong_value = True
+                            print("PARAMETER <{}> INVALID VALUE. PLEASE CHECK CONFIG".format(param))
+                        else:
+                            try:
+                                if param == "outputs":
+                                    for output in value:
+                                        parsed = output.split("-")
+                                        if not self.__isRouterIdValid(int(parsed[2])):
+                                            #output router id is out of range
+                                            raise ValueError
+                                        if not self.__isPortValid(int(parsed[0])):
+                                            #output port is out of range
+                                            raise ValueError
+                            except(ValueError):
+                                is_wrong_value = True
+                                print("PARAMETER <{}> INVALID VALUE. PLEASE CHECK CONFIG".format(param))
+                            else:
+
+                                #inserts the value in config file as the value for params dict for given key: param
+                                self.params[param] = value
                     
         #checks for missing required parameters by finding if any of the required fields are still None
         for param in self.params:
-            if self.params[param] == None and param in self.__req_params:
-                raise TypeError("PARAMETER <{}> MISSING. PLEASE CHECK CONFIG".format(param))    
+            try:
+                if self.params[param] == None and param not in self.__req_params:
+                    raise TypeError
+            except(TypeError):
+                is_wrong_value = True
+                if param != 'timers':
+                    print("Error : Config Validity check failed! <{}> is MISSING or not VALID! ".format(param))
+        if is_wrong_value :
+            sys.exit(1)
 
 #___Class Router_____________________________________________________________________________________________________________________ 
 
