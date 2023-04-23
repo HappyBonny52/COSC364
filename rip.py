@@ -260,7 +260,7 @@ class Demon:
                 filtered[dest] = self.cur_table[dest] 
             else:
                 #split_horizon
-                if (self.cur_table[dest]['next-hop'] and dest) != peer_rtr:
+                if (self.cur_table[dest]['next-hop'] != peer_rtr and dest != peer_rtr) :
                     #filter entry with not known information to peer router
                     filtered[dest] = self.cur_table[dest]
         return self.rip_response_packet(self.compose_rip_entry(filtered))
@@ -309,15 +309,26 @@ class Demon:
         version = int.from_bytes(packet[1:2], "big") #version should be 2
         rtr_id_as_ip_addr = int.from_bytes(packet[2:4], "big") #This should be in range of 1024 <= x <= 64000
         is_valid = True
+
+        if len(packet)%4!= 0 or not (24<=len(packet)<=504): #When Packet Size is wrong
+            is_valid = False
+            print("Packet Invalid : Packet Size is wrong")
+            if len(packet)<20:
+                print("Error : Packet Size is too small")
+                print("Rip entry should be at least more than one\n")
+            if len(packet)>504:
+                print("Error : Packet Size is too Big")
+                print("Rip entries can be contained at most 25\n")
+            return False
         if command != 2:
             is_valid = False
-            print("Packet Invalid : Wrong value of command")
+            print("Packet Invalid [Common Header] : Wrong value for command")
         if  version != 2:
             is_valid = False
-            print("Packet Invalid : Wrong value of version")
+            print("Packet Invalid [Common Header] : Wrong value for version")
         if not (1 <= rtr_id_as_ip_addr <= 64000) :
             is_valid = False
-            print("Packet Invalid : Wrong value of router")
+            print("Packet Invalid [Common Header] : Wrong value for router id")
 
         for i in range((len(packet)-4)// 20):
             afi = (int.from_bytes(packet[4+20*i:6+20*i], "big"))#afi should be 0
@@ -326,19 +337,19 @@ class Demon:
             metric= int.from_bytes(packet[(20+20*i):(24+20*i)], "big") #This should be in range of 0 <= x <= 15
             if afi != 0:
                 is_valid = False
-                print("Packet Invalid : Wrong value of address family identifier")
-            if must_be_zeros != 0:
+                print(f"Packet Invalid [Rip entry {i}] : Wrong value for address family identifier")
+            if must_be_zeros != 0 :
                 is_valid = False
-                print("Packet Invalid : Wrong value of must_be_zero field")
+                print(f"Packet Invalid [Rip entry {i}] : Wrong value for must_be_zero field")
             if not (1 <= dest_id <= 64000):
                 is_valid = False
-                print("Packet Invalid : Wrong value of destination router id")
+                print(f"Packet Invalid [Rip entry {i}] : Wrong value for destination router id")
             if not (0 <= metric <= 15):
-                if metric > 15:
+                if 20 > metric > 15:
                     self.timer_garbage_collection(dest_id)
                 else:
                     flag = False
-                    print("Packet Invalid : Wrong value of metric")
+                    print(f"Packet Invalid [Rip entry {i}] : Wrong value for metric")
 
             entry[dest_id] = {'next-hop': receive_from, 'metric': metric} 
         return entry if is_valid else False
