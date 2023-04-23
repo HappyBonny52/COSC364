@@ -57,13 +57,11 @@ class Config:
 
     def __isOutputValid(self, value, inputs):
         is_output_wrong = False
-        outputs, costs, peers, wrong_outputs, wrong_costs, wrong_peers = [], [], [], [], [], []
+        outputs, costs, peers, wrong_outputs, wrong_costs, wrong_peers, duplicated_peer = [], [], [], [], [], [], []
         
         for line in value:
             if len(line.split("-"))!=3 or '' in line.split("-"):
-                print("ERROR : ONE OF VALUES IS MISSING IN OUTPUTS")
-                print("FILL OUT MISSING VALUES FIRST TO READ CONFIG FILE")
-                print("UNABLE TO READ CONFIG")
+                print("ERROR : ONE OF VALUES IS MISSING IN OUTPUTS ! UNABLE TO READ CONFIG")
                 return sys.exit(1)
             else:
                 output, cost, peer = int(line.split("-")[0]), int(line.split("-")[1]), int(line.split("-")[2])
@@ -76,7 +74,11 @@ class Config:
                     is_output_wrong = True
                     wrong_costs.append(cost)
                 peers.append(peer)
-                if not self.__isRouterIdValid(peer):
+                if int(peer) == int(self.params["router-id"][0]) or len(list(peers)) !=  len(set(peers)):
+                    is_output_wrong = True
+                    duplicated_peer.append(peer)
+                
+                if not self.__isRouterIdValid(int(peer)):
                     is_output_wrong = True
                     wrong_peers.append(peer)
 
@@ -91,7 +93,9 @@ class Config:
         if len(wrong_costs) != 0:
             print("ERROR : METRIC invalid\n\tWrong METRIC : {} ".format(wrong_costs))
         if len(wrong_peers) != 0:
-            print("ERROR : PEER_ROUTER_ID invalid\n\tWrong PEER_ROUTER_ID : {} ".format(wrong_peers))
+            if len(duplicated_peer) != 0:
+                print("ERROR : PEER_ROUTER_ID is duplicated.\n\tExisting ROUTER_ID : {} ".format(duplicated_peer[0]))
+            print("ERROR : PEER_ROUTER_ID invalid\n\tWrong PEER_ROUTER_ID : {} ".format(list(set(wrong_peers+duplicated_peer))))
         return is_output_wrong
 
     def _is_missing_value(self, config):
@@ -123,13 +127,11 @@ class Config:
                         raise ValueError
                 if len(self.params['outputs']) != len(self.params['input-ports']):
                     print(f"ERROR : The number of outputs and input-ports are not matched")
-                    print("\tThe number of ports should be matched!")
                     is_missing = True
                     raise ValueError
                         
             except(ValueError):
-                print("ERROR : UNABLE TO READ CONFIG")
-                print("FILL OUT MISSING VALUES FIRST TO READ CONFIG FILE")
+                print("ERROR : UNABLE TO READ CONFIG ! FILL OUT MISSING VALUES FIRST TO READ CONFIG FILE ")
                 sys.exit(1)
         return is_missing
 
@@ -146,7 +148,6 @@ class Config:
 
         is_packet_valid = True
         if not self._is_missing_value(config):
-            print("WHat is rtr id", self.params['outputs'])
             if not self.__isRouterIdValid(int(self.params["router-id"][0])):
                 is_packet_valid = False
                 print("ERROR : ['ROUTER-ID'] invalid\n\tWrong ROUTER_ID : {}".format(self.params['router-id']))
@@ -162,7 +163,7 @@ class Config:
                 print("ERROR : ['OUTPUTS'] contain invalid values")
 
             if not is_packet_valid :
-                print("ERROR : UNABLE TO READ CONFIG")
+                print("UNABLE TO READ CONFIG")
                 sys.exit(1)
         else:
             sys.exit(1)
@@ -345,7 +346,7 @@ class Demon:
                         checked_packet = self.is_packet_valid(resp_pkt, receive_from)
                         if  checked_packet:
                             self.response_pkt = resp_pkt
-                            print(f"----Received entries-----\n{checked_packet}")
+                            #print(f"----Received entries-----\n{checked_packet}")
                             self.entry_update(checked_packet, receive_from)
                         else:
                             print(f"Received packet from router {receive_from} failed validity check!")
