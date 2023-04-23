@@ -174,10 +174,10 @@ class Demon:
         else:
             self.timers = {'periodic':1, 'timeout':6, 'garbage-collection':4}
         self.router = Router
+        self.tick = 0
         self.route_change_flags = {self.router.rtr_id: False}
         self.timer_status = {self.router.rtr_id: "         "}
         self.timeouts, self.garbage_collects = {}, {}
-        self.poison_reverse_needed, self.poison_entry_needed= set(), set()
         self.socket_list = self.create_socket()
         self.cur_table = self.router.generate_table([[self.router.rtr_id], [self.router.rtr_id], [0]])
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
@@ -187,6 +187,7 @@ class Demon:
 
                     
     #______Process Packet__________________________________________________________________________________
+
     def create_socket(self):
         """Creating UDP sockets and to bind one with each of input_port"""
         socket_list = []
@@ -255,7 +256,7 @@ class Demon:
         for dest in self.cur_table:
             #posion_reverse
             if self.cur_table[dest]['metric'] > 15: 
-                #not filtering entry as it has to be send to peer router 
+                #not filtering entry as it has to be sent to peer router 
                 filtered[dest] = self.cur_table[dest] 
             else:
                 #split_horizon
@@ -281,7 +282,7 @@ class Demon:
                     receive_from = list(self.router.neighbor)[i]
                     if read_socket == self.socket_list[i]:
                         print(f'\nReceived packet from ROUTER {receive_from}')
-                        self.detect_timeout(receive_from)                            
+                        self.detect_timeout(receive_from)                  
                         resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
                         checked_packet = self.is_packet_valid(resp_pkt, receive_from)
                         if  checked_packet:
@@ -299,6 +300,7 @@ class Demon:
                     if reachable in self.cur_table:
                         if self.cur_table[reachable]['next-hop'] == receive_from:
                             self.timer_timeout(reachable)
+ 
 
     def is_packet_valid(self, packet, receive_from):
         """Check if the received packet is valid return packet contents if True else return False """
@@ -351,18 +353,18 @@ class Demon:
             print('Keyboard Interrupted!')
         sys.exit(1)
 
-
     #_____Timer Event_______________________________________________________________________________________
 
     def timer_timeout(self, dst_id):
         """ For a given dst_id, it either adds a new Timer thread object 
         that will eventually call timer_garbage_collection(dst_id) OR 'Refreshes' the timer 
-        for given dst_id in self.timeouts dictionary by creating a new Timer thread object"""      
+        for given dst_id in self.timeouts dictionary by creating a new Timer thread object"""    
         if self.timeouts.get(dst_id, None):
             self.timeouts[dst_id].cancel()
             del self.timeouts[dst_id]
-        self.timeouts[dst_id] = Timer(self.timers['timeout'], lambda: self.timer_garbage_collection(dst_id))
-        self.timeouts[dst_id].start()
+        else:
+            self.timeouts[dst_id] = Timer(self.timers['timeout'], lambda: self.timer_garbage_collection(dst_id))
+            self.timeouts[dst_id].start()
 
     def timer_garbage_collection(self, dst_id):
         """Used for adding a Timer thread object that will eventually call entry_remove(dst_id) for a given dst_id"""
@@ -370,14 +372,18 @@ class Demon:
             self.timeouts[dst_id].cancel()
             del self.timeouts[dst_id]
         
-        if not self.garbage_collects.get(dst_id, None):
+        if not self.garbage_collects.get(dst_id, None) :
             if dst_id != self.router.rtr_id:
                 self.entry_timeout(dst_id)
-            print(f"Route for reaching * ROUTER {dst_id} * crashed!")
-            self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
-            self.send_packet()
-            self.garbage_collects[dst_id] = Timer(self.timers['garbage-collection'], lambda: self.entry_remove(dst_id))
-            self.garbage_collects[dst_id].start()
+                for reachable in self.cur_table:
+                    if reachable != self.router.rtr_id:
+                        if self.cur_table[reachable]['next-hop'] == dst_id:
+                            self.entry_timeout(reachable)
+                            self.tick = 0
+                print(f"Route for reaching * ROUTER {dst_id} * crashed!")
+                self.send_packet()
+                self.garbage_collects[dst_id] = Timer(self.timers['garbage-collection'], lambda: self.entry_remove(dst_id))
+                self.garbage_collects[dst_id].start()
 
     def timer_remove_garbage_collection(self, dst_id):
         """Used for removing the Timer thread object that will eventually call entry_remove(dst_id) for a given dst_id"""
@@ -385,7 +391,6 @@ class Demon:
             self.garbage_collects[dst_id].cancel()
             self.timer_status[dst_id] = "         "
             del self.garbage_collects[dst_id]
-
 
     #_____Update and entry process_______________________________________________________________________________________
 
@@ -426,16 +431,24 @@ class Demon:
         if better_path :
             print("Triggered update : Send packets due to the route change")
             self.send_packet()
-
         print(f"----Updated Table--------")
         self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
     
     def entry_unreachable(self, receive_from):
         """Remove entries containing unreachable route with metric more than 16"""
+        self.tick += 1
+        if self.tick >=self.timers['garbage-collection']+2:
+            for dst in self.cur_table.copy():
+                if self.timer_status[dst] == "TIMED_OUT" and dst != self.router.rtr_id and not self.garbage_collects.get(dst, None):
+                    print(f"Route to {dst} via {receive_from} is unreachable")
+                    self.cur_table.pop(dst) 
+                    self.tick = 0
+            
         for dst in self.cur_table.copy():
             if self.timer_status[dst] != "TIMED_OUT" and self.cur_table[dst]['metric']>15 and dst != self.router.rtr_id:
                 print(f"Route to {dst} via {receive_from} is unreachable")
-                self.cur_table.pop(dst)      
+                self.cur_table.pop(dst) 
+        
                
         self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
 
@@ -450,8 +463,9 @@ class Demon:
             del self.garbage_collects[dst_id]
             
         if self.cur_table.get(dst_id, None) and dst_id != self.router.rtr_id:
-            print(f"Remove entry for * Route {dst_id} * : ")
+            print(f"Remove entry for * Route {dst_id} * ")
             self.cur_table.pop(dst_id)
+            self.tick = 0
             
             print_lock = threading.Lock()
             print_lock.acquire()
