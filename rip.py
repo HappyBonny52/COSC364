@@ -54,6 +54,40 @@ class Config:
         """Checks routerId is in range of 1 <= routerId <= 64000
         returns True if in range and False otherwise"""       
         return False if routerId < 1 or routerId > 64000 else True
+
+    def __isOutputValid(self, value, inputs):
+        is_output_wrong = False
+        outputs, costs, peers, wrong_outputs, wrong_costs, wrong_peers = [], [], [], [], [], []
+        
+        for line in value:
+            output, cost, peer = int(line.split("-")[0]), int(line.split("-")[1]), int(line.split("-")[2])
+            outputs.append(output) 
+            if not self.__isPortValid(output):
+                is_output_wrong = True
+                wrong_outputs.append(output)
+            costs.append(cost)
+            if not self.__isMetricValid(cost):
+                is_output_wrong = True
+                wrong_costs.append(cost)
+            peers.append(peer)
+            if not self.__isRouterIdValid(peer):
+                is_output_wrong = True
+                wrong_peers.append(peer)
+
+        #check if output port is not valid as there's an existing inputs with the same port number
+        is_duplicated = [output for output in outputs if output in inputs]
+        if len(is_duplicated) != 0:
+            is_output_wrong = True
+            print("ERROR : OUTPUT_PORT is DUPLICATED with INPUT_PORT. Duplicated Value : {} ".format(is_duplicated))
+        if len(wrong_outputs) != 0:
+            all_wrong_outputs = set(is_duplicated+wrong_outputs)
+            print("ERROR : OUTPUT_PORT in Outputs INVALID. Wrong Values : {} ".format(list(all_wrong_outputs)))
+        if len(wrong_costs) != 0:
+            print("ERROR : METRIC in Outputs INVALID. Wrong Value : {} ".format(wrong_costs))
+        if len(wrong_peers) != 0:
+            print("ERROR : PEER_ROUTER_ID in Outputs INVALID. Wrong Value : {} ".format(wrong_peers))
+        return is_output_wrong
+
         
     def unpack(self):
         """
@@ -63,7 +97,8 @@ class Config:
         config_file = open(self.path, "r")
         config = config_file.read().split('\n')
         config_file.close()
-        is_wrong_value = False
+        is_output_wrong = False
+        is_packet_valid = False
 
         for line in config:
             #checks if line is even worth further parsing ie. is a parameter line
@@ -77,42 +112,27 @@ class Config:
                             #router-id is out of range
                             raise ValueError
                 except(ValueError):
-                    is_wrong_value = True
-                    print("PARAMETER <{}> INVALID VALUE. Wrong Given Value : {} ".format(param, int(value[0])))
+                    is_packet_valid = True
+                    print("ERROR : PARAMETER <{}> INVALID. Wrong Value : {} ".format(param, int(value[0])))
                 else:
                     try:
                         if param == "input-ports":
-                            given_inputs = [int(port) for port in value]
+                            self.given_inputs = [int(port) for port in value]
                             wrong_inputs = [int(port) for port in value if not self.__isPortValid(int(port))]
                             if len(wrong_inputs) != 0:
                                 raise ValueError
                     except(ValueError):
-                        is_wrong_value = True
-                        print("PARAMETER <{}> INVALID VALUE. Wrong Given Value : {} ".format(param, wrong_inputs))
+                        is_packet_valid = True
+                        print("ERROR : PARAMETER <{}> INVALID. Wrong Value : {} ".format(param, wrong_inputs))
                     else:
                         try:
                             if param == "outputs":
-                                given_outputs = [int(line.split("-")[0]) for line in value]
-                                given_costs = [int(line.split("-")[1]) for line in value]
-                                given_peers = [int(line.split("-")[2]) for line in value]
-
-                                wrong_outputs = [int(line.split("-")[2]) for line in value if not self.__isPortValid(int(line.split("-")[2]))]
-                                wrong_costs = [int(line.split("-")[2]) for line in value if not self.]
-                                wrong_peers = [int(line.split("-")[2]) for line in value]
-                                print("given_outputs!", given_outputs)
-                                print("given_cost", given_costs)
-                                print("given_peers", given_peers)
-                                for output in value:
-                                    parsed = output.split("-")
-                                    if not self.__isRouterIdValid(int(parsed[2])):
-                                        #output router id is out of range
-                                        raise ValueError
-                                    if not self.__isPortValid(int(parsed[0])):
-                                        #output port is out of range
-                                        raise ValueError
+                                is_output_invalid = self.__isOutputValid(value, self.given_inputs)
+                                if is_output_invalid:
+                                    raise ValueError
                         except(ValueError):
-                            is_wrong_value = True
-                            print("PARAMETER <{}> INVALID VALUE. Wrong Given Value : {} ".format(param, int(parsed[0])))
+                            is_packet_valid = True
+                            print("ERROR : PARAMETER <{}> CONTAINS INVALID VALUE".format(param))
                         else:
                             #inserts the value in config file as the value for params dict for given key: param
                             self.params[param] = value
@@ -123,10 +143,10 @@ class Config:
                 if self.params[param] == None and param not in self.__req_params:
                     raise TypeError
             except(TypeError):
-                is_wrong_value = True
+                is_packet_valid = True
                 if param != 'timers':
-                    print("Error : Config Validity check failed! <{}> is MISSING or not VALID! ".format(param))
-        if is_wrong_value :
+                    print("CONFIG VALIDITY CHECK FAILED ! <{}> is MISSING or not VALID! ".format(param))
+        if is_packet_valid :
             sys.exit(1)
 
 #___Class Router_____________________________________________________________________________________________________________________ 
