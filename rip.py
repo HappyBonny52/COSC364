@@ -193,6 +193,7 @@ class Router:
         return neighbor
     
     def display_table(self, contents, flag, timer):
+        #contents format : {dest_id: {'next_hop' : next_hop_router, 'metric' : metric_val}}
         display = f"Routing table of router {self.rtr_id}\n"
         display += '+-----------------------------------------------------------------------+\n'
         display += '|  Destination  |  Next-hop  |  Cost  |  Route Change Flag  |   Timer   |\n'
@@ -471,39 +472,33 @@ class Demon:
     #_____Update and entry process_______________________________________________________________________________________
 
     def update_periodic(self):
-         #Generates random float between [0.8*periodic time, 1.2*periodic time] and rounds to 2dp
-        period = round(rand.uniform(0.8*self.timers['periodic'],1.2*self.timers['periodic']), 2)
+        #Generates random float between [0.8*periodic time, 1.2*periodic time] and rounds to 2dp
+        period = round(rand.uniform(0.8*self.timers['periodic'], 1.2*self.timers['periodic']), 2)
         threading.Timer(period, self.update_periodic).start()
-
+        self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
         print(f"Periodic Update : Sending packet ...... ")
         self.send_packet()
                        
     def entry_update(self, new_entry, receive_from):
         link_cost = self.router.neighbor[receive_from]['cost']
-
         for new_dst in new_entry:
             new_metric = new_entry[new_dst]['metric'] + link_cost
             if new_metric <=15: # Only deal with entries that are not poisoned
                 if (new_dst not in self.cur_table): # if new_dst not in current_table
                     self.route_change_flags[new_dst] = True
                     self.timer_status[new_dst] = '         '
-                    print(f"******NOTICE : NEW ROUTE FOUND : ROUTER {new_dst} IS REACHABLE******" )
                     self.cur_table = self.router.add_entry(self.cur_table, new_dst, receive_from, new_metric)
 
                 else : # if new_dst in current_table      
                     self.route_change_flags[new_dst] = False
-                    if (new_metric < self.cur_table[new_dst]['metric']):
+                    if (new_metric < self.cur_table[new_dst]['metric']): #if better route has been found
                         if self.timer_status[new_dst] != "TIMED_OUT":
                             self.route_change_flags[new_dst] = True
-                            print(f"******NOTICE : BETTER ROUTE FOUND FOR ROUTER******")
-                            print(f"ROUTE {new_dst} : cost reduced from {self.cur_table[new_dst]['metric']} to {new_metric}")
                             self.cur_table = self.router.modify_entry(self.cur_table, new_dst, receive_from, new_metric)           
                                     
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
         self.entry_unreachable(receive_from)
-
-        print(f"----Updated Table--------")
-        self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
+        
     
     def entry_unreachable(self, receive_from):
         """Remove entries containing unreachable route with metric more than 16"""
@@ -514,7 +509,6 @@ class Demon:
                 self.route_change_flags[dst] = True
             if self.timer_status[dst] != "TIMED_OUT" and self.cur_table[dst]['metric']>15:
                 if dst != self.router.rtr_id:
-                    print(f"Route to {dst} via {receive_from} is unreachable")
                     self.cur_table.pop(dst) 
                
         self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
@@ -531,7 +525,7 @@ class Demon:
             del self.garbage_collects[dst_id]
             
         if self.cur_table.get(dst_id, None) and dst_id != self.router.rtr_id:
-            print(f"Remove entry for * Route {dst_id} * ")
+            print(f"Remove entry for * ROUTE {dst_id} * ")
             self.cur_table.pop(dst_id)
 
             print_lock = threading.Lock()
