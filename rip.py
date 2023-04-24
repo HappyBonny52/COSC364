@@ -147,23 +147,23 @@ class Config:
         config = config_file.read().split('\n')
         config_file.close()
 
-        is_packet_valid = True
+        is_config_valid = True
         if not self._is_missing_value(config):
             if not self.__isRouterIdValid(int(self.params["router-id"][0])):
-                is_packet_valid = False
+                is_config_valid = False
                 print("ERROR : ['ROUTER-ID'] invalid\n\tWrong ROUTER_ID : {}".format(self.params['router-id']))
             
             wrong_inputs = [int(port) for port in self.params['input-ports'] if not self.__isPortValid(int(port))]
             if len(wrong_inputs) != 0:
-                is_packet_valid = False
+                is_config_valid = False
                 print(f"ERROR : ['INPUT-PORTS'] invalid\n\tWrong INPUT_PORT : {wrong_inputs} ")
 
             is_output_invalid = self.__isOutputValid(self.params['outputs'], self.params['input-ports'])
             if is_output_invalid:
-                is_packet_valid = False
+                is_config_valid = False
                 print("ERROR : ['OUTPUTS'] contain invalid values")
 
-            if not is_packet_valid :
+            if not is_config_valid :
                 print("UNABLE TO READ CONFIG")
                 sys.exit(1)
         else:
