@@ -348,14 +348,13 @@ class Demon:
                         checked_packet = self.is_packet_valid(resp_pkt, receive_from)
                         if  checked_packet:
                             self.response_pkt = resp_pkt
-                            #print(f"----Received entries-----\n{checked_packet}") 
-                            #comment out the line above to see received Packet
                             self.entry_update(checked_packet, receive_from)
                         else:
                             print(f"Received packet from router {receive_from} failed validity check!")
                             print("Drop this packet....")
                             
     def detect_timeout(self, receive_from):
+        """To detect timeout for peer router and all reachable route via peer router"""
         if receive_from != self.router.rtr_id:
             self.timer_timeout(receive_from) 
             for reachable in self.cur_table.copy():
@@ -455,11 +454,11 @@ class Demon:
         
         if not self.garbage_collects.get(dst_id, None) :
             if dst_id != self.router.rtr_id:
-                self.entry_timeout(dst_id)
+                self.entry_timeout(dst_id) #generate poison entry
                 for reachable in self.cur_table:
                     if reachable != self.router.rtr_id:
                         if self.cur_table[reachable]['next-hop'] == dst_id:
-                            self.entry_timeout(reachable)
+                            self.entry_timeout(reachable) #generate poison entry
                             self.tick = 0
                 print(f"Route for reaching * ROUTER {dst_id} * crashed!")
                 self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
@@ -491,7 +490,7 @@ class Demon:
 
         for new_dst in new_entry:
             new_metric = new_entry[new_dst]['metric'] + link_cost
-            if new_metric <=15:
+            if new_metric <=15: # Only deal with entries that are not poisoned
                 if (new_dst not in self.cur_table): # if new_dst not in current_table
                     self.route_change_flags[new_dst] = True
                     self.timer_status[new_dst] = '         '
@@ -516,6 +515,7 @@ class Demon:
     def entry_unreachable(self, receive_from):
         """Remove entries containing unreachable route with metric more than 16"""
         self.tick += 1
+        #This is for removing entries that are timed_out but not removed as the timer keeps refreshing 
         if self.tick >=self.timers['garbage-collection']:
             for dst in self.cur_table.copy():
                 if dst != self.router.rtr_id:
@@ -524,7 +524,8 @@ class Demon:
                             print(f"Route to {dst} via {receive_from} is unreachable")
                             self.cur_table.pop(dst) 
             self.tick = 0
-            
+        #This is for removing entries with metric over 15 by pure link calculation
+        #But the poisoned entries are not removed as they have to be sent to peers
         for dst in self.cur_table.copy():
             if self.timer_status[dst] == "TIMED_OUT":
                 self.route_change_flags[dst] = True
@@ -537,6 +538,7 @@ class Demon:
         self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
 
     def entry_timeout(self, dst_id):
+        """Set timeout entries for showing timed_out situation in routing table"""
         if dst_id in self.cur_table :
             self.cur_table[dst_id]['metric'] = 16
             self.timer_status[dst_id]= "TIMED_OUT"
