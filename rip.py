@@ -234,7 +234,6 @@ class Demon:
         else:
             self.timers = {'periodic':1, 'timeout':6, 'garbage-collection':4}
         self.router = Router
-        self.tick = 0
         self.route_change_flags = {self.router.rtr_id: False}
         self.timer_status = {self.router.rtr_id: "         "}
         self.timeouts, self.garbage_collects = {}, {}
@@ -441,9 +440,8 @@ class Demon:
         if self.timeouts.get(dst_id, None):
             self.timeouts[dst_id].cancel()
             del self.timeouts[dst_id]
-        else:
-            self.timeouts[dst_id] = Timer(self.timers['timeout'], lambda: self.timer_garbage_collection(dst_id))
-            self.timeouts[dst_id].start()
+        self.timeouts[dst_id] = Timer(self.timers['timeout'], lambda: self.timer_garbage_collection(dst_id))
+        self.timeouts[dst_id].start()
 
     def timer_garbage_collection(self, dst_id):
         """Used for adding a Timer thread object that will 
@@ -455,11 +453,6 @@ class Demon:
         if not self.garbage_collects.get(dst_id, None) :
             if dst_id != self.router.rtr_id:
                 self.entry_timeout(dst_id) #generate poison entry
-                for reachable in self.cur_table:
-                    if reachable != self.router.rtr_id:
-                        if self.cur_table[reachable]['next-hop'] == dst_id:
-                            self.entry_timeout(reachable) #generate poison entry
-                            self.tick = 0
                 print(f"Route for reaching * ROUTER {dst_id} * crashed!")
                 self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
                 print("TRIGGERED UPDATE : Due to unreachable route detection!")
@@ -514,16 +507,6 @@ class Demon:
     
     def entry_unreachable(self, receive_from):
         """Remove entries containing unreachable route with metric more than 16"""
-        self.tick += 1
-        #This is for removing entries that are timed_out but not removed as the timer keeps refreshing 
-        if self.tick >=self.timers['garbage-collection']:
-            for dst in self.cur_table.copy():
-                if dst != self.router.rtr_id:
-                    if self.timer_status[dst] == "TIMED_OUT" :
-                        if self.cur_table[dst]['next-hop'] not in self.cur_table:
-                            print(f"Route to {dst} via {receive_from} is unreachable")
-                            self.cur_table.pop(dst) 
-            self.tick = 0
         #This is for removing entries with metric over 15 by pure link calculation
         #But the poisoned entries are not removed as they have to be sent to peers
         for dst in self.cur_table.copy():
@@ -533,7 +516,6 @@ class Demon:
                 if dst != self.router.rtr_id:
                     print(f"Route to {dst} via {receive_from} is unreachable")
                     self.cur_table.pop(dst) 
-        
                
         self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
 
@@ -551,8 +533,7 @@ class Demon:
         if self.cur_table.get(dst_id, None) and dst_id != self.router.rtr_id:
             print(f"Remove entry for * Route {dst_id} * ")
             self.cur_table.pop(dst_id)
-            self.tick = 0
-            
+
             print_lock = threading.Lock()
             print_lock.acquire()
             self.timer_remove_garbage_collection(dst_id)
