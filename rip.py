@@ -8,7 +8,7 @@ from threading import Timer, Lock
 
 RECV_BUFFSIZE = 1024 
 
-#___Class Config_____________________________________________________________________________________________________________________ 
+#___Class Config______________________________________________________________________
 class Config:
     """Config object initialised with argument string that is 
     the string representation of the config filepath for <obj> 
@@ -35,10 +35,7 @@ class Config:
              router-id: {1}
              input-ports: {2}
              outputs: {3}
-             timers: {4}\n""".format(self.path, self.params['router-id'],
-                                                       self.params['input-ports'],
-                                                       self.params['outputs'],
-                                                       self.params['timers'],)
+             timers: {4}\n""".format(self.path, self.params['router-id'], self.params['input-ports'], self.params['outputs'], self.params['timers'])
     def __isMetricValid(self, metric):
         """ Checks if metric is in range of 1 <= metric <= 16"""
          #The metric field contains a value between 1 and 15 (inclusive) which
@@ -170,7 +167,7 @@ class Config:
             sys.exit(1)
         
 
-#___Class Router_____________________________________________________________________________________________________________________ 
+#___Class Router_________________________________________________________________________
 
 class Router:
     """For this router to have its own information based on config file"""
@@ -226,7 +223,7 @@ class Router:
         table[dst_rtr]['metric'] = cost 
         return table
 
-#___Class Demon_____________________________________________________________________________________________________________________ 
+#___Class Demon___________________________________________________________________________________
 
 class Demon:
     def __init__(self, Router, timers=None):
@@ -246,7 +243,7 @@ class Demon:
         self.packet_exchange()
 
                     
-    #______Process Packet__________________________________________________________________________________
+    #______Process Packet___________________________________________________________________________
 
     def create_socket(self):
         """Creating UDP sockets and to bind one with each of input_port"""
@@ -343,15 +340,15 @@ class Demon:
                     receive_from = list(self.router.neighbor)[i]
                     if read_socket == self.socket_list[i]:
                         print(f'\nReceived packet from ROUTER {receive_from}')
-                        self.detect_timeout(receive_from)                  
+                        self.detect_timeout(receive_from)   
                         resp_pkt, port = self.socket_list[i].recvfrom(RECV_BUFFSIZE)
                         checked_packet = self.is_packet_valid(resp_pkt, receive_from)
                         if  checked_packet:
                             self.response_pkt = resp_pkt
                             self.entry_update(checked_packet, receive_from)
                         else:
-                            print(f"Received packet from router {receive_from} failed validity check!")
-                            print("Drop this packet....")
+                            print(f"RECEIVED PACKET FROM ROUTER {receive_from} INVALID!")
+                            print("DROP THIS PACKET....................................")
                             
     def detect_timeout(self, receive_from):
         """To detect timeout for peer router and all reachable route via peer router"""
@@ -454,9 +451,8 @@ class Demon:
         if not self.garbage_collects.get(dst_id, None) :
             if dst_id != self.router.rtr_id:
                 self.entry_timeout(dst_id) #generate poison entry
-                print(f"Route for reaching * ROUTER {dst_id} * crashed!")
+                print(f"TRIGGERED UPDATE : * ROUTER {dst_id} * UNREACHABLE!")
                 self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
-                print("TRIGGERED UPDATE : Due to unreachable route detection!")
                 self.send_packet()
                 self.garbage_collects[dst_id] = Timer(self.timers['garbage-collection'], lambda: self.entry_remove(dst_id))
                 self.garbage_collects[dst_id].start()
@@ -469,7 +465,7 @@ class Demon:
             self.timer_status[dst_id] = "         "
             del self.garbage_collects[dst_id]
 
-    #_____Update and entry process_______________________________________________________________________________________
+    #_____Update and entry process______________________________________________________________________
 
     def update_periodic(self):
         #Generates random float between [0.8*periodic time, 1.2*periodic time] and rounds to 2dp
@@ -498,7 +494,7 @@ class Demon:
                                     
         self.response_pkt = self.rip_response_packet(self.compose_rip_entry(self.cur_table))
         self.entry_unreachable(receive_from)
-        
+        self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
     
     def entry_unreachable(self, receive_from):
         """Remove entries containing unreachable route with metric more than 16"""
@@ -511,7 +507,6 @@ class Demon:
                 if dst != self.router.rtr_id:
                     self.cur_table.pop(dst) 
                
-        self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
 
     def entry_timeout(self, dst_id):
         """Set timeout entries for showing timed_out situation in routing table"""
@@ -531,7 +526,6 @@ class Demon:
             print_lock = threading.Lock()
             print_lock.acquire()
             self.timer_remove_garbage_collection(dst_id)
-            self.router.display_table(self.cur_table, self.route_change_flags, self.timer_status)
             print_lock.release()
 
 
